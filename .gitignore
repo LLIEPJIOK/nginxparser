@@ -8,6 +8,7 @@
 *.so
 *.dylib
 bin
+.bin/
 
 # Test binary, built with `go test -c`
 *.test
@@ -25,4 +26,5 @@ go.work.sum
 # env file
 *.env
 
-bin
+# logs file
+logs.txt

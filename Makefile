@@ -1,6 +1,6 @@
 COVERAGE_FILE ?= coverage.out
 
-TARGET ?= run # CHANGE THIS TO YOUR BINARY NAME/NAMES
+TARGET ?= parser
 
 .PHONY: build
 build:
