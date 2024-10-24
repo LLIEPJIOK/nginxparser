@@ -13,3 +13,17 @@ func NewErrRegexp(msg string) error {
 func (e ErrRegexp) Error() string {
 	return e.msg
 }
+
+type ErrInvalidURL struct {
+	msg string
+}
+
+func NewErrInvalidURL(msg string) error {
+	return ErrInvalidURL{
+		msg: msg,
+	}
+}
+
+func (e ErrInvalidURL) Error() string {
+	return e.msg
+}

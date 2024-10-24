@@ -20,19 +20,15 @@ func Start() error {
 		return ErrEmptyLogPath{}
 	}
 
-	f, err := os.Open(path)
-	if err != nil {
-		return fmt.Errorf("open file %q: %w", path, err)
-	}
-
 	logParser := parser.NewParser()
 
-	info, err := logParser.Parse(f)
+	info, err := logParser.Parse(path)
 	if err != nil {
 		return fmt.Errorf("parse file: %w", err)
 	}
 
-	fmt.Println(info)
+	f, _ := os.OpenFile("test.md", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	logParser.Markdown(info, f)
 
 	return nil
 }

@@ -1,6 +1,7 @@
 package domain
 
 type FileInfo struct {
+	Path             string
 	TotalRequests    int
 	AvgResponseSize  int
 	ResponseSize95p  int
@@ -12,14 +13,14 @@ func NewFileInfo(
 	totalRequests, avgResponseSize, responseSize95p int,
 	frequentURLs []URL,
 	frequentStatuses []Status,
-) FileInfo {
+) *FileInfo {
 	frequentURLsCopy := make([]URL, len(frequentURLs))
 	copy(frequentURLsCopy, frequentURLs)
 
 	frequentStatusesCopy := make([]Status, len(frequentStatuses))
 	copy(frequentStatusesCopy, frequentStatuses)
 
-	return FileInfo{
+	return &FileInfo{
 		TotalRequests:    totalRequests,
 		AvgResponseSize:  avgResponseSize,
 		ResponseSize95p:  responseSize95p,

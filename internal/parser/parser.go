@@ -4,7 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
+	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -14,6 +17,29 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+func parseURL(path string) (*url.URL, error) {
+	u, err := url.Parse(path)
+	if err != nil {
+		return nil, fmt.Errorf("parse url: %w", err)
+	}
+
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, NewErrInvalidURL(fmt.Sprintf("unsupported scheme: %s", u.Scheme))
+	}
+
+	if u.Host == "" {
+		return nil, NewErrInvalidURL("host is empty")
+	}
+
+	return u, nil
+}
+
+func closeResource(res io.Closer) {
+	if err := res.Close(); err != nil {
+		slog.Error(fmt.Sprintf("close reader: %s", err))
+	}
+}
+
 func get95p[T ~int | ~string](sl []T) T {
 	sort.Slice(sl, func(i, j int) bool {
 		return sl[i] < sl[j]
@@ -22,9 +48,9 @@ func get95p[T ~int | ~string](sl []T) T {
 	return sl[95*len(sl)/100]
 }
 
-const dataLimit = 3
+const frequencyLimit = 3
 
-func dataToFileInfo(parseData data) domain.FileInfo {
+func dataToFileInfo(parseData data) *domain.FileInfo {
 	avgResponseSize := parseData.sizeSum / parseData.totalRequests
 	responseSize95p := get95p(parseData.sizeSlice)
 
@@ -37,7 +63,7 @@ func dataToFileInfo(parseData data) domain.FileInfo {
 		return frequentURLs[i].Quantity > frequentURLs[j].Quantity
 	})
 
-	urlLimit := min(dataLimit, len(frequentURLs))
+	urlLimit := min(frequencyLimit, len(frequentURLs))
 	frequentURLs = frequentURLs[:urlLimit]
 
 	frequentStatuses := make([]domain.Status, 0, len(parseData.urls))
@@ -52,7 +78,7 @@ func dataToFileInfo(parseData data) domain.FileInfo {
 		return frequentStatuses[i].Quantity > frequentStatuses[j].Quantity
 	})
 
-	statusLimit := min(dataLimit, len(frequentStatuses))
+	statusLimit := min(frequencyLimit, len(frequentStatuses))
 	frequentStatuses = frequentStatuses[:statusLimit]
 
 	return domain.NewFileInfo(
@@ -128,9 +154,9 @@ func (p *Parser) processLine(lines <-chan line, parseData *data) error {
 	return nil
 }
 
-func (p *Parser) read(in io.Reader) <-chan line {
+func (p *Parser) read(reader io.Reader) <-chan line {
 	lineNumber := 1
-	scan := bufio.NewScanner(in)
+	scan := bufio.NewScanner(reader)
 	linesChan := make(chan line)
 
 	go func() {
@@ -149,9 +175,33 @@ func (p *Parser) read(in io.Reader) <-chan line {
 
 const numberOfGoroutines = 5
 
-func (p *Parser) Parse(in io.Reader) (domain.FileInfo, error) {
+func (p *Parser) Parse(path string) (*domain.FileInfo, error) {
+	var reader io.ReadCloser
+
+	if pathURL, err := parseURL(path); err == nil {
+		resp, err := http.Get(pathURL.String())
+		if err != nil {
+			return nil, fmt.Errorf("get file from url: %w", err)
+		}
+
+		defer closeResource(resp.Body)
+
+		reader = resp.Body
+	} else {
+		slog.Debug(fmt.Sprintf("parse %q as url: %s", path, err))
+
+		f, err := os.Open(path)
+		if err != nil {
+			return nil, fmt.Errorf("open file %q: %w", path, err)
+		}
+
+		defer closeResource(f)
+
+		reader = f
+	}
+
 	parseData := newData()
-	linesChan := p.read(in)
+	linesChan := p.read(reader)
 
 	eg := errgroup.Group{}
 	for range numberOfGoroutines {
@@ -161,8 +211,37 @@ func (p *Parser) Parse(in io.Reader) (domain.FileInfo, error) {
 	}
 
 	if err := eg.Wait(); err != nil {
-		return domain.FileInfo{}, fmt.Errorf("eg.Wait(): %w", err)
+		return nil, fmt.Errorf("eg.Wait(): %w", err)
 	}
 
-	return dataToFileInfo(parseData), nil
+	fileInfo := dataToFileInfo(parseData)
+	fileInfo.Path = path
+
+	return fileInfo, nil
+}
+
+func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
+	fmt.Fprint(out, "#### General information\n\n")
+	fmt.Fprint(out, "| Метрика | Значение |\n")
+	fmt.Fprint(out, "|:-|-:|\n")
+	fmt.Fprintf(out, "| File | %s |\n", info.Path)
+	fmt.Fprintf(out, "| Number of requests | %d |\n", info.TotalRequests)
+	fmt.Fprintf(out, "| Average Response Size | %d |\n", info.AvgResponseSize)
+	fmt.Fprintf(out, "| 95th Percentile of Response Size | %d |\n\n", info.ResponseSize95p)
+
+	fmt.Fprint(out, "#### Requested resources\n\n")
+	fmt.Fprint(out, "| Resource | Count |\n")
+	fmt.Fprint(out, "|:-|-:|\n")
+
+	for _, url := range info.FrequentURLs {
+		fmt.Fprintf(out, "| `%s` | %d |\n", url.Name, url.Quantity)
+	}
+
+	fmt.Fprint(out, "#### Response codes\n\n")
+	fmt.Fprint(out, "| Code | Name | Count |\n")
+	fmt.Fprint(out, "|:-|:-:|-:|\n")
+
+	for _, status := range info.FrequentStatuses {
+		fmt.Fprintf(out, "| %d | %s | %d |\n", status.Code, status.Name, status.Quantity)
+	}
 }
