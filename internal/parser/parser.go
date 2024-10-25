@@ -51,16 +51,24 @@ func get95p[T ~int | ~string](sl []T) T {
 const frequencyLimit = 3
 
 func dataToFileInfo(parseData data) *domain.FileInfo {
+	if parseData.totalRequests == 0 {
+		return &domain.FileInfo{}
+	}
+
 	avgResponseSize := parseData.sizeSum / parseData.totalRequests
 	responseSize95p := get95p(parseData.sizeSlice)
 
 	frequentURLs := make([]domain.URL, 0, len(parseData.urls))
 	for url, quantity := range parseData.urls {
-		frequentURLs = append(frequentURLs, domain.NewResource(url, quantity))
+		frequentURLs = append(frequentURLs, domain.NewURL(url, quantity))
 	}
 
 	sort.Slice(frequentURLs, func(i, j int) bool {
-		return frequentURLs[i].Quantity > frequentURLs[j].Quantity
+		if frequentURLs[i].Quantity != frequentURLs[j].Quantity {
+			return frequentURLs[i].Quantity > frequentURLs[j].Quantity
+		}
+
+		return frequentURLs[i].Name < frequentURLs[j].Name
 	})
 
 	urlLimit := min(frequencyLimit, len(frequentURLs))
@@ -75,7 +83,11 @@ func dataToFileInfo(parseData data) *domain.FileInfo {
 	}
 
 	sort.Slice(frequentStatuses, func(i, j int) bool {
-		return frequentStatuses[i].Quantity > frequentStatuses[j].Quantity
+		if frequentStatuses[i].Quantity != frequentStatuses[j].Quantity {
+			return frequentStatuses[i].Quantity > frequentStatuses[j].Quantity
+		}
+
+		return frequentStatuses[i].Code < frequentStatuses[j].Code
 	})
 
 	statusLimit := min(frequencyLimit, len(frequentStatuses))
@@ -122,7 +134,11 @@ func (p *Parser) lineToLog(line string) (log, error) {
 		return log{}, fmt.Errorf("failed to parse status: %w", err)
 	}
 
-	bodyBytesSend, err := strconv.Atoi(matches[8])
+	if http.StatusText(status) == "" {
+		return log{}, NewErrBadStatus("no such status")
+	}
+
+	bodyBytesSent, err := strconv.Atoi(matches[8])
 	if err != nil {
 		return log{}, fmt.Errorf("failed to parse bodyBytesSend: %w", err)
 	}
@@ -135,7 +151,7 @@ func (p *Parser) lineToLog(line string) (log, error) {
 		url:           matches[5],
 		httpVersion:   matches[6],
 		status:        status,
-		bodyBytesSend: bodyBytesSend,
+		bodyBytesSend: bodyBytesSent,
 		referer:       matches[9],
 		userAgent:     matches[10],
 	}, nil

@@ -34,7 +34,7 @@ type URL struct {
 	Quantity int
 }
 
-func NewResource(name string, quantity int) URL {
+func NewURL(name string, quantity int) URL {
 	return URL{
 		Name:     name,
 		Quantity: quantity,

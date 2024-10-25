@@ -27,3 +27,17 @@ func NewErrInvalidURL(msg string) error {
 func (e ErrInvalidURL) Error() string {
 	return e.msg
 }
+
+type ErrBadStatus struct {
+	msg string
+}
+
+func NewErrBadStatus(msg string) error {
+	return ErrBadStatus{
+		msg: msg,
+	}
+}
+
+func (e ErrBadStatus) Error() string {
+	return e.msg
+}
