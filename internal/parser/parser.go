@@ -2,15 +2,18 @@ package parser
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/es-debug/backend-academy-2024-go-template/internal/domain"
@@ -170,29 +173,105 @@ func (p *Parser) processLine(lines <-chan line, parseData *data) error {
 	return nil
 }
 
-func (p *Parser) read(reader io.Reader) <-chan line {
+func (p *Parser) read(ctx context.Context, reader io.ReadCloser, linesChan chan<- line) {
 	lineNumber := 1
 	scan := bufio.NewScanner(reader)
-	linesChan := make(chan line)
 
 	go func() {
 		defer close(linesChan)
 
 		for scan.Scan() {
 			text := scan.Text()
-			linesChan <- newLine(text, lineNumber)
+			select {
+			case linesChan <- newLine(text, lineNumber):
+
+			case <-ctx.Done():
+				return
+			}
 
 			lineNumber++
 		}
 	}()
+}
 
-	return linesChan
+func (p *Parser) ParseFiles(ctx context.Context, fileNames []string, linesChan chan<- line) error {
+	chs := make([]chan line, len(fileNames))
+	files := make([]*os.File, len(fileNames))
+
+	clean := func() {
+		for _, file := range files {
+			if file != nil {
+				closeResource(file)
+			}
+		}
+	}
+
+	for i, fileName := range fileNames {
+		f, err := os.Open(fileName)
+		if err != nil {
+			clean()
+			return fmt.Errorf("open file %q: %w", fileName, err)
+		}
+
+		chs[i] = make(chan line)
+		p.read(ctx, f, chs[i])
+
+		files[i] = f
+	}
+
+	wg := &sync.WaitGroup{}
+
+	for _, ch := range chs {
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+
+			for l := range ch {
+				select {
+				case linesChan <- l:
+
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		clean()
+		close(linesChan)
+	}()
+
+	return nil
+}
+
+func (p *Parser) HandleFilesPath(ctx context.Context, path string, linesChan chan<- line) error {
+	fileNames, err := filepath.Glob(path)
+	if err != nil {
+		return fmt.Errorf("find files for pattern %q: %w", path, err)
+	}
+
+	if len(fileNames) == 0 {
+		return NewErrNoFiles("no files for this pattern")
+	}
+
+	err = p.ParseFiles(ctx, fileNames, linesChan)
+	if err != nil {
+		return fmt.Errorf("parse files: %w", err)
+	}
+
+	return nil
 }
 
 const numberOfGoroutines = 5
 
 func (p *Parser) Parse(path string) (*domain.FileInfo, error) {
-	var reader io.ReadCloser
+	linesChan := make(chan line)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	defer cancel()
 
 	if pathURL, err := parseURL(path); err == nil {
 		resp, err := http.Get(pathURL.String())
@@ -202,22 +281,16 @@ func (p *Parser) Parse(path string) (*domain.FileInfo, error) {
 
 		defer closeResource(resp.Body)
 
-		reader = resp.Body
+		p.read(ctx, resp.Body, linesChan)
 	} else {
 		slog.Debug(fmt.Sprintf("parse %q as url: %s", path, err))
 
-		f, err := os.Open(path)
-		if err != nil {
-			return nil, fmt.Errorf("open file %q: %w", path, err)
+		if err := p.HandleFilesPath(ctx, path, linesChan); err != nil {
+			return nil, fmt.Errorf("handle files path: %w", err)
 		}
-
-		defer closeResource(f)
-
-		reader = f
 	}
 
 	parseData := newData()
-	linesChan := p.read(reader)
 
 	eg := errgroup.Group{}
 	for range numberOfGoroutines {

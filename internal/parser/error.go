@@ -41,3 +41,17 @@ func NewErrBadStatus(msg string) error {
 func (e ErrBadStatus) Error() string {
 	return e.msg
 }
+
+type ErrNoFiles struct {
+	msg string
+}
+
+func NewErrNoFiles(msg string) error {
+	return ErrNoFiles{
+		msg: msg,
+	}
+}
+
+func (e ErrNoFiles) Error() string {
+	return e.msg
+}
