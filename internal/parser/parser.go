@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -51,12 +52,7 @@ func closeFiles(files []*os.File) {
 	}
 }
 
-func getFiles(pattern string) ([]*os.File, error) {
-	paths, err := filepath.Glob(pattern)
-	if err != nil {
-		return nil, fmt.Errorf("find files for pattern %q: %w", pattern, err)
-	}
-
+func getFiles(paths []string) ([]*os.File, error) {
 	if len(paths) == 0 {
 		return nil, NewErrNoFiles("no files for this pattern")
 	}
@@ -86,7 +82,7 @@ func get95p[T ~int | ~string](sl []T) T {
 
 const frequencyLimit = 3
 
-func dataToFileInfo(parseData data) *domain.FileInfo {
+func dataToFileInfo(parseData *data) *domain.FileInfo {
 	if parseData.totalRequests == 0 {
 		return &domain.FileInfo{}
 	}
@@ -129,7 +125,11 @@ func dataToFileInfo(parseData data) *domain.FileInfo {
 	statusLimit := min(frequencyLimit, len(frequentStatuses))
 	frequentStatuses = frequentStatuses[:statusLimit]
 
+	pathsCopy := make([]string, len(parseData.paths))
+	copy(pathsCopy, parseData.paths)
+
 	return domain.NewFileInfo(
+		pathsCopy,
 		parseData.totalRequests,
 		avgResponseSize,
 		responseSize95p,
@@ -464,6 +464,7 @@ func (p *Parser) collectFanOut(
 func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, error) {
 	var lines <-chan line
 
+	parseData := newData()
 	eg, ctx := errgroup.WithContext(context.Background())
 
 	if pathURL, err := parseURL(path); err == nil {
@@ -478,7 +479,14 @@ func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, erro
 	} else {
 		slog.Debug(fmt.Sprintf("parse %q as url: %s", path, err))
 
-		files, err := getFiles(path)
+		paths, err := filepath.Glob(path)
+		if err != nil {
+			return nil, fmt.Errorf("find files for pattern %q: %w", path, err)
+		}
+
+		parseData.paths = paths
+
+		files, err := getFiles(paths)
 		if err != nil {
 			return nil, fmt.Errorf("getFiles(%q): %w", path, err)
 		}
@@ -490,16 +498,13 @@ func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, erro
 
 	filterChan := p.convertLineFanIn(ctx, eg, p.convertLineFanOut(ctx, eg, lines)...)
 	collectChan := p.filterTimeFanIn(eg, p.filterTimeFanOut(ctx, eg, from, to, filterChan)...)
-
-	parseData := newData()
 	p.collectFanOut(ctx, eg, collectChan, &parseData)
 
 	if err := eg.Wait(); err != nil {
 		return nil, fmt.Errorf("eg.Wait(): %w", err)
 	}
 
-	fileInfo := dataToFileInfo(parseData)
-	fileInfo.Path = path
+	fileInfo := dataToFileInfo(&parseData)
 
 	return fileInfo, nil
 }
@@ -508,7 +513,7 @@ func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
 	fmt.Fprint(out, "#### General information\n\n")
 	fmt.Fprint(out, "| Метрика | Значение |\n")
 	fmt.Fprint(out, "|:-|-:|\n")
-	fmt.Fprintf(out, "| File | %s |\n", info.Path)
+	fmt.Fprintf(out, "| Files | %s |\n", strings.Join(info.Paths, ", "))
 	fmt.Fprintf(out, "| Number of requests | %d |\n", info.TotalRequests)
 	fmt.Fprintf(out, "| Average Response Size | %d |\n", info.AvgResponseSize)
 	fmt.Fprintf(out, "| 95th Percentile of Response Size | %d |\n\n", info.ResponseSize95p)
@@ -528,4 +533,39 @@ func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
 	for _, status := range info.FrequentStatuses {
 		fmt.Fprintf(out, "| %d | %s | %d |\n", status.Code, status.Name, status.Quantity)
 	}
+}
+
+func (p *Parser) Adoc(info *domain.FileInfo, out io.Writer) {
+	fmt.Fprint(out, "==== General Information\n\n")
+	fmt.Fprint(out, "[options=\"header\"]\n")
+	fmt.Fprint(out, "|===\n")
+	fmt.Fprint(out, "| Метрика | Значение\n")
+
+	fmt.Fprintf(out, "| Files | %s\n", strings.Join(info.Paths, ", "))
+	fmt.Fprintf(out, "| Number of Requests | %d\n", info.TotalRequests)
+	fmt.Fprintf(out, "| Average Response Size | %d\n", info.AvgResponseSize)
+	fmt.Fprintf(out, "| 95th Percentile of Response Size | %d\n", info.ResponseSize95p)
+	fmt.Fprint(out, "|===\n\n")
+
+	fmt.Fprint(out, "==== Requested Resources\n\n")
+	fmt.Fprint(out, "[options=\"header\"]\n")
+	fmt.Fprint(out, "|===\n")
+	fmt.Fprint(out, "| Resource | Count\n")
+
+	for _, url := range info.FrequentURLs {
+		fmt.Fprintf(out, "| `%s` | %d\n", url.Name, url.Quantity)
+	}
+
+	fmt.Fprint(out, "|===\n\n")
+
+	fmt.Fprint(out, "==== Response Codes\n\n")
+	fmt.Fprint(out, "[options=\"header\"]\n")
+	fmt.Fprint(out, "|===\n")
+	fmt.Fprint(out, "| Code | Name | Count\n")
+
+	for _, status := range info.FrequentStatuses {
+		fmt.Fprintf(out, "| %d | %s | %d\n", status.Code, status.Name, status.Quantity)
+	}
+
+	fmt.Fprint(out, "|===\n")
 }

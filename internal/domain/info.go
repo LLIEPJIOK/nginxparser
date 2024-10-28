@@ -1,7 +1,7 @@
 package domain
 
 type FileInfo struct {
-	Path             string
+	Paths            []string
 	TotalRequests    int
 	AvgResponseSize  int
 	ResponseSize95p  int
@@ -10,6 +10,7 @@ type FileInfo struct {
 }
 
 func NewFileInfo(
+	paths []string,
 	totalRequests, avgResponseSize, responseSize95p int,
 	frequentURLs []URL,
 	frequentStatuses []Status,
@@ -21,6 +22,7 @@ func NewFileInfo(
 	copy(frequentStatusesCopy, frequentStatuses)
 
 	return &FileInfo{
+		Paths:            paths,
 		TotalRequests:    totalRequests,
 		AvgResponseSize:  avgResponseSize,
 		ResponseSize95p:  responseSize95p,

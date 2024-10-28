@@ -6,6 +6,7 @@ import (
 
 type data struct {
 	mu            *sync.RWMutex
+	paths         []string
 	totalRequests int
 	urls          map[string]int
 	statuses      map[int]int

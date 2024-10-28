@@ -59,8 +59,8 @@ func Start() error {
 		return fmt.Errorf("parse file: %w", err)
 	}
 
-	f, _ := os.OpenFile("test.md", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	logParser.Markdown(info, f)
+	f, _ := os.OpenFile("test.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	logParser.Adoc(info, f)
 
 	return nil
 }
