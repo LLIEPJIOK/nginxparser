@@ -98,7 +98,7 @@ func TestParseFile(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			data, err := logParser.Parse(fileName)
+			data, err := logParser.Parse(fileName, nil, nil)
 			require.NoError(t, err, "file must be parsed")
 
 			assert.Equal(t, tc.totalRequests, data.TotalRequests)
@@ -144,7 +144,7 @@ func TestParseFileContentError(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			_, err := logParser.Parse(fileName)
+			_, err := logParser.Parse(fileName, nil, nil)
 			require.Error(t, err, "bad content")
 		})
 	}
@@ -165,7 +165,7 @@ func TestParseFileExistenceError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logParser := parser.NewParser()
 
-			_, err := logParser.Parse(tc.fileName)
+			_, err := logParser.Parse(tc.fileName, nil, nil)
 			require.Error(t, err, "bad content")
 		})
 	}
@@ -218,7 +218,7 @@ func TestParseURL(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			data, err := logParser.Parse(server.URL)
+			data, err := logParser.Parse(server.URL, nil, nil)
 			require.NoError(t, err, "must parse data from server")
 
 			assert.Equal(t, tc.totalRequests, data.TotalRequests)
@@ -249,7 +249,7 @@ func TestParseURLError(t *testing.T) {
 		t.Run(fmt.Sprintf("#%d", i+1), func(t *testing.T) {
 			logParser := parser.NewParser()
 
-			_, err := logParser.Parse(tc.url)
+			_, err := logParser.Parse(tc.url, nil, nil)
 			require.Error(t, err, "bad url")
 		})
 	}

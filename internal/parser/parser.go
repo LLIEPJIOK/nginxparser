@@ -43,6 +43,39 @@ func closeResource(res io.Closer) {
 	}
 }
 
+func closeFiles(files []*os.File) {
+	for _, f := range files {
+		if f != nil {
+			closeResource(f)
+		}
+	}
+}
+
+func getFiles(pattern string) ([]*os.File, error) {
+	paths, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("find files for pattern %q: %w", pattern, err)
+	}
+
+	if len(paths) == 0 {
+		return nil, NewErrNoFiles("no files for this pattern")
+	}
+
+	files := make([]*os.File, len(paths))
+
+	for i, path := range paths {
+		f, err := os.Open(path)
+		if err != nil {
+			closeFiles(files)
+			return nil, fmt.Errorf("open file %q: %w", path, err)
+		}
+
+		files[i] = f
+	}
+
+	return files, nil
+}
+
 func get95p[T ~int | ~string](sl []T) T {
 	sort.Slice(sl, func(i, j int) bool {
 		return sl[i] < sl[j]
@@ -160,118 +193,278 @@ func (p *Parser) lineToLog(line string) (log, error) {
 	}, nil
 }
 
-func (p *Parser) processLine(lines <-chan line, parseData *data) error {
-	for curLine := range lines {
-		logEntry, err := p.lineToLog(curLine.text)
-		if err != nil {
-			return fmt.Errorf("convert line #%d to log entry: %w", curLine.number, err)
-		}
+func (p *Parser) read(ctx context.Context, eg *errgroup.Group, reader io.ReadCloser) <-chan line {
+	lines := make(chan line)
 
-		parseData.processLog(&logEntry)
-	}
-
-	return nil
-}
-
-func (p *Parser) read(ctx context.Context, reader io.ReadCloser, linesChan chan<- line) {
 	lineNumber := 1
 	scan := bufio.NewScanner(reader)
 
-	go func() {
-		defer close(linesChan)
+	eg.Go(func() error {
+		defer close(lines)
 
 		for scan.Scan() {
 			text := scan.Text()
 			select {
-			case linesChan <- newLine(text, lineNumber):
+			case lines <- newLine(text, lineNumber):
 
 			case <-ctx.Done():
-				return
+				return nil
 			}
 
 			lineNumber++
 		}
-	}()
+
+		return nil
+	})
+
+	return lines
 }
 
-func (p *Parser) ParseFiles(ctx context.Context, fileNames []string, linesChan chan<- line) error {
-	chs := make([]chan line, len(fileNames))
-	files := make([]*os.File, len(fileNames))
+func (p *Parser) parseFilesFanOut(
+	ctx context.Context,
+	eg *errgroup.Group,
+	files []*os.File,
+) []<-chan line {
+	chs := make([]<-chan line, len(files))
 
-	clean := func() {
-		for _, file := range files {
-			if file != nil {
-				closeResource(file)
-			}
-		}
-	}
-
-	for i, fileName := range fileNames {
-		f, err := os.Open(fileName)
-		if err != nil {
-			clean()
-			return fmt.Errorf("open file %q: %w", fileName, err)
-		}
-
-		chs[i] = make(chan line)
-		p.read(ctx, f, chs[i])
-
+	for i, f := range files {
+		chs[i] = p.read(ctx, eg, f)
 		files[i] = f
 	}
+
+	return chs
+}
+
+func (p *Parser) parseFilesFanIn(
+	ctx context.Context,
+	eg *errgroup.Group,
+	chs ...<-chan line,
+) <-chan line {
+	lines := make(chan line)
 
 	wg := &sync.WaitGroup{}
 
 	for _, ch := range chs {
 		wg.Add(1)
 
-		go func() {
+		eg.Go(func() error {
 			defer wg.Done()
 
 			for l := range ch {
 				select {
-				case linesChan <- l:
+				case lines <- l:
 
 				case <-ctx.Done():
-					return
+					return nil
 				}
 			}
-		}()
+
+			return nil
+		})
 	}
 
 	go func() {
 		wg.Wait()
-		clean()
-		close(linesChan)
+		close(lines)
 	}()
 
-	return nil
+	return lines
 }
 
-func (p *Parser) HandleFilesPath(ctx context.Context, path string, linesChan chan<- line) error {
-	fileNames, err := filepath.Glob(path)
-	if err != nil {
-		return fmt.Errorf("find files for pattern %q: %w", path, err)
-	}
+func (p *Parser) convertLine(
+	ctx context.Context,
+	eg *errgroup.Group,
+	lines <-chan line,
+) <-chan log {
+	logs := make(chan log)
 
-	if len(fileNames) == 0 {
-		return NewErrNoFiles("no files for this pattern")
-	}
+	eg.Go(func() error {
+		defer close(logs)
 
-	err = p.ParseFiles(ctx, fileNames, linesChan)
-	if err != nil {
-		return fmt.Errorf("parse files: %w", err)
-	}
+		for curLine := range lines {
+			logEntry, err := p.lineToLog(curLine.text)
+			if err != nil {
+				return fmt.Errorf("convert line #%d to log entry: %w", curLine.number, err)
+			}
 
-	return nil
+			select {
+			case logs <- logEntry:
+
+			case <-ctx.Done():
+				return nil
+			}
+		}
+
+		return nil
+	})
+
+	return logs
 }
 
-const numberOfGoroutines = 5
+const convertGoroutines = 2
 
-func (p *Parser) Parse(path string) (*domain.FileInfo, error) {
-	linesChan := make(chan line)
-	ctx, cancel := context.WithCancel(context.Background())
+func (p *Parser) convertLineFanOut(
+	ctx context.Context,
+	eg *errgroup.Group,
+	lines <-chan line,
+) []<-chan log {
+	chs := make([]<-chan log, convertGoroutines)
 
-	defer cancel()
+	for i := range convertGoroutines {
+		chs[i] = p.convertLine(ctx, eg, lines)
+	}
+
+	return chs
+}
+
+func (p *Parser) convertLineFanIn(
+	ctx context.Context,
+	eg *errgroup.Group,
+	chs ...<-chan log,
+) <-chan log {
+	wg := &sync.WaitGroup{}
+	logs := make(chan log)
+
+	for _, ch := range chs {
+		wg.Add(1)
+
+		eg.Go(func() error {
+			defer wg.Done()
+
+			for lg := range ch {
+				select {
+				case logs <- lg:
+
+				case <-ctx.Done():
+					return nil
+				}
+			}
+
+			return nil
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(logs)
+	}()
+
+	return logs
+}
+
+func (p *Parser) filterTime(
+	ctx context.Context,
+	eg *errgroup.Group,
+	from, to *time.Time,
+	filterChan <-chan log,
+) <-chan log {
+	finalChan := make(chan log)
+
+	eg.Go(func() error {
+		defer close(finalChan)
+
+		for lg := range filterChan {
+			if from != nil && from.After(lg.timeLocal) || to != nil && to.Before(lg.timeLocal) {
+				continue
+			}
+
+			select {
+			case finalChan <- lg:
+
+			case <-ctx.Done():
+				return nil
+			}
+		}
+
+		return nil
+	})
+
+	return finalChan
+}
+
+const filterTimeGoroutines = 2
+
+func (p *Parser) filterTimeFanOut(
+	ctx context.Context,
+	eg *errgroup.Group,
+	from, to *time.Time,
+	filterChan <-chan log,
+) []<-chan log {
+	chs := make([]<-chan log, filterTimeGoroutines)
+
+	for i := range filterTimeGoroutines {
+		chs[i] = p.filterTime(ctx, eg, from, to, filterChan)
+	}
+
+	return chs
+}
+
+func (p *Parser) filterTimeFanIn(eg *errgroup.Group, chs ...<-chan log) <-chan log {
+	wg := &sync.WaitGroup{}
+	logs := make(chan log)
+
+	for _, ch := range chs {
+		wg.Add(1)
+
+		eg.Go(func() error {
+			defer wg.Done()
+
+			for lg := range ch {
+				logs <- lg
+			}
+
+			return nil
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(logs)
+	}()
+
+	return logs
+}
+
+func (p *Parser) collect(
+	ctx context.Context,
+	eg *errgroup.Group,
+	finalChan <-chan log,
+	parseData *data,
+) {
+	eg.Go(func() error {
+		for {
+			select {
+			case lg, ok := <-finalChan:
+				if !ok {
+					return nil
+				}
+
+				parseData.processLog(&lg)
+
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
+}
+
+const collectGoroutines = 2
+
+func (p *Parser) collectFanOut(
+	ctx context.Context,
+	eg *errgroup.Group,
+	collectChan <-chan log,
+	parseData *data,
+) {
+	for range collectGoroutines {
+		p.collect(ctx, eg, collectChan, parseData)
+	}
+}
+
+func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, error) {
+	var lines <-chan line
+
+	eg, ctx := errgroup.WithContext(context.Background())
 
 	if pathURL, err := parseURL(path); err == nil {
 		resp, err := http.Get(pathURL.String())
@@ -281,23 +474,25 @@ func (p *Parser) Parse(path string) (*domain.FileInfo, error) {
 
 		defer closeResource(resp.Body)
 
-		p.read(ctx, resp.Body, linesChan)
+		lines = p.read(ctx, eg, resp.Body)
 	} else {
 		slog.Debug(fmt.Sprintf("parse %q as url: %s", path, err))
 
-		if err := p.HandleFilesPath(ctx, path, linesChan); err != nil {
-			return nil, fmt.Errorf("handle files path: %w", err)
+		files, err := getFiles(path)
+		if err != nil {
+			return nil, fmt.Errorf("getFiles(%q): %w", path, err)
 		}
+
+		defer closeFiles(files)
+
+		lines = p.parseFilesFanIn(ctx, eg, p.parseFilesFanOut(ctx, eg, files)...)
 	}
+
+	filterChan := p.convertLineFanIn(ctx, eg, p.convertLineFanOut(ctx, eg, lines)...)
+	collectChan := p.filterTimeFanIn(eg, p.filterTimeFanOut(ctx, eg, from, to, filterChan)...)
 
 	parseData := newData()
-
-	eg := errgroup.Group{}
-	for range numberOfGoroutines {
-		eg.Go(func() error {
-			return p.processLine(linesChan, &parseData)
-		})
-	}
+	p.collectFanOut(ctx, eg, collectChan, &parseData)
 
 	if err := eg.Wait(); err != nil {
 		return nil, fmt.Errorf("eg.Wait(): %w", err)
