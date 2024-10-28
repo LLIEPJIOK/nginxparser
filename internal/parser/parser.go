@@ -364,7 +364,7 @@ func (p *Parser) filterTime(
 		defer close(finalChan)
 
 		for lg := range filterChan {
-			if from != nil && from.After(lg.timeLocal) || to != nil && to.Before(lg.timeLocal) {
+			if from != nil && from.After(lg.timeLocal) || to != nil && to.Before(lg.timeLocal.Truncate(24*time.Hour)) {
 				continue
 			}
 

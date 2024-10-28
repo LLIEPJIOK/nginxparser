@@ -3,29 +3,54 @@ package parser_test
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
-func createTestFile(t *testing.T, content string) string {
-	fileName := fmt.Sprintf("test_%d", time.Now().UnixNano())
+const timeLayout = "02/Jan/2006"
 
-	f, err := os.Create(fileName)
-	require.NoError(t, err, "file must be created")
+func createTestFiles(t *testing.T, content ...string) string {
+	dir := uuid.NewString()
+	err := os.Mkdir(dir, 0o600)
+	require.NoError(t, err, "dir should be created")
 
-	fmt.Fprint(f, content)
+	for _, c := range content {
+		fileName := fmt.Sprintf("%s/test_%d", dir, time.Now().UnixNano())
 
-	defer func() {
-		err := f.Close()
+		f, err := os.Create(fileName)
+		require.NoError(t, err, "file must be created")
+
+		fmt.Fprint(f, c)
+
+		err = f.Close()
 		require.NoError(t, err, "file must be closed")
-	}()
 
-	return fileName
+		time.Sleep(time.Nanosecond)
+	}
+
+	return fmt.Sprintf("%s/test_*", dir)
 }
 
-func deleteTestFile(t *testing.T, fileName string) {
-	err := os.Remove(fileName)
-	require.NoError(t, err, "file should be removed")
+func deleteTestFiles(t *testing.T, path string) {
+	err := os.RemoveAll(path)
+	require.NoError(t, err, "path should be removed")
+}
+
+func getRoot(path string) string {
+	if slashIndex := strings.Index(path, "/"); slashIndex != -1 {
+		return path[:slashIndex]
+	}
+
+	return path
+}
+
+func getTime(t *testing.T, value string) *time.Time {
+	tm, err := time.Parse(timeLayout, value)
+	require.NoError(t, err, "time must be parsed")
+
+	return &tm
 }
