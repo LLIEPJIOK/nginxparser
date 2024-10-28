@@ -3,8 +3,9 @@ package parser
 import (
 	"flag"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
-	"time"
 
 	"github.com/es-debug/backend-academy-2024-go-template/internal/parser"
 )
@@ -12,55 +13,54 @@ import (
 const dataLayout = "2006-01-02"
 
 func Start() error {
-	var (
-		path string
-		from string
-		to   string
-
-		timeFrom *time.Time
-		timeTo   *time.Time
-	)
-
-	flag.StringVar(&path, "path", "", "path to file")
-	flag.StringVar(&path, "p", "", "path to file")
-	flag.StringVar(&from, "from", "", "filter by time from")
-	flag.StringVar(&from, "f", "", "filter by time from")
-	flag.StringVar(&to, "to", "", "filter by time to")
-	flag.StringVar(&to, "t", "", "filter by time to")
-
-	flag.Parse()
-
-	if path == "" {
-		return ErrEmptyLogPath{}
+	fl, err := readCMDFlags()
+	if err != nil {
+		flag.Usage()
+		return fmt.Errorf("readCMDFlags(): %w", err)
 	}
 
-	if from != "" {
-		tm, err := time.Parse(dataLayout, from)
-		if err != nil {
-			return fmt.Errorf("parse from date: %w", err)
-		}
-
-		timeFrom = &tm
-	}
-
-	if from != "" {
-		tm, err := time.Parse(dataLayout, from)
-		if err != nil {
-			return fmt.Errorf("parse to date: %w", err)
-		}
-
-		timeTo = &tm
+	if fl.help {
+		flag.Usage()
+		return nil
 	}
 
 	logParser := parser.NewParser()
 
-	info, err := logParser.Parse(path, timeFrom, timeTo)
+	info, err := logParser.Parse(fl.path, fl.timeFrom, fl.timeTo)
 	if err != nil {
 		return fmt.Errorf("parse file: %w", err)
 	}
 
-	f, _ := os.OpenFile("test.txt", os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	logParser.Adoc(info, f)
+	var wr io.Writer
+
+	if fl.output != "" {
+		f, err := os.OpenFile(fl.output, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+		if err != nil {
+			return fmt.Errorf("open file %q: %w", fl.output, err)
+		}
+
+		defer func() {
+			if err := f.Close(); err != nil {
+				slog.Error(fmt.Sprintf("close file %q: %s", fl.output, err))
+			}
+		}()
+
+		wr = f
+	} else {
+		wr = os.Stdout
+	}
+
+	switch fl.format {
+	case "adoc":
+		logParser.Adoc(info, wr)
+
+	case "md", "markdown":
+		logParser.Markdown(info, wr)
+
+	default:
+		flag.Usage()
+		return NewErrFlag("format: unknown flag")
+	}
 
 	return nil
 }
