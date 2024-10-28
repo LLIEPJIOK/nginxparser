@@ -7,15 +7,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
 const timeLayout = "02/Jan/2006"
 
 func createTestFiles(t *testing.T, content ...string) string {
-	dir := uuid.NewString()
-	err := os.Mkdir(dir, 0o600)
+	dir, err := os.MkdirTemp("", "test_*")
 	require.NoError(t, err, "dir should be created")
 
 	for _, c := range content {
