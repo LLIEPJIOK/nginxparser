@@ -72,7 +72,7 @@ func getFiles(paths []string) ([]*os.File, error) {
 	return files, nil
 }
 
-func get95p[T ~int | ~string](sl []T) T {
+func get95p[T ~int](sl []T) T {
 	sort.Slice(sl, func(i, j int) bool {
 		return sl[i] < sl[j]
 	})
@@ -82,14 +82,7 @@ func get95p[T ~int | ~string](sl []T) T {
 
 const frequencyLimit = 3
 
-func dataToFileInfo(parseData *data) *domain.FileInfo {
-	if parseData.totalRequests == 0 {
-		return &domain.FileInfo{}
-	}
-
-	avgResponseSize := parseData.sizeSum / parseData.totalRequests
-	responseSize95p := get95p(parseData.sizeSlice)
-
+func frequentURLs(parseData *data) []domain.URL {
 	frequentURLs := make([]domain.URL, 0, len(parseData.urls))
 	for url, quantity := range parseData.urls {
 		frequentURLs = append(frequentURLs, domain.NewURL(url, quantity))
@@ -106,6 +99,10 @@ func dataToFileInfo(parseData *data) *domain.FileInfo {
 	urlLimit := min(frequencyLimit, len(frequentURLs))
 	frequentURLs = frequentURLs[:urlLimit]
 
+	return frequentURLs
+}
+
+func frequentStatuses(parseData *data) []domain.Status {
 	frequentStatuses := make([]domain.Status, 0, len(parseData.urls))
 	for status, quantity := range parseData.statuses {
 		frequentStatuses = append(
@@ -125,21 +122,66 @@ func dataToFileInfo(parseData *data) *domain.FileInfo {
 	statusLimit := min(frequencyLimit, len(frequentStatuses))
 	frequentStatuses = frequentStatuses[:statusLimit]
 
-	pathsCopy := make([]string, len(parseData.paths))
-	copy(pathsCopy, parseData.paths)
+	return frequentStatuses
+}
+
+func frequentAddresses(parseData *data) []domain.Address {
+	frequentAddresses := make([]domain.Address, 0, len(parseData.addresses))
+	for ip, quantity := range parseData.addresses {
+		frequentAddresses = append(
+			frequentAddresses,
+			domain.NewAddress(ip, quantity),
+		)
+	}
+
+	sort.Slice(frequentAddresses, func(i, j int) bool {
+		if frequentAddresses[i].Quantity != frequentAddresses[j].Quantity {
+			return frequentAddresses[i].Quantity > frequentAddresses[j].Quantity
+		}
+
+		return frequentAddresses[i].Name < frequentAddresses[j].Name
+	})
+
+	addressLimit := min(frequencyLimit, len(frequentAddresses))
+	frequentAddresses = frequentAddresses[:addressLimit]
+
+	return frequentAddresses
+}
+
+func dataToFileInfo(parseData *data) *domain.FileInfo {
+	if parseData.totalRequests == 0 {
+		return &domain.FileInfo{}
+	}
+
+	avgResponseSize := parseData.sizeSum / parseData.totalRequests
+	responseSize95p := get95p(parseData.sizeSlice)
+
+	freqURLs := frequentURLs(parseData)
+	freqStatuses := frequentStatuses(parseData)
+	freqAddresses := frequentAddresses(parseData)
+
+	avgResponsesPerDay := 0
+	for _, quantity := range parseData.requestsPerDay {
+		avgResponsesPerDay += quantity
+	}
+
+	avgResponsesPerDay /= len(parseData.requestsPerDay)
 
 	return domain.NewFileInfo(
-		pathsCopy,
+		parseData.paths,
 		parseData.totalRequests,
 		avgResponseSize,
 		responseSize95p,
-		frequentURLs,
-		frequentStatuses,
+		avgResponsesPerDay,
+		freqURLs,
+		freqStatuses,
+		freqAddresses,
 	)
 }
 
 type Parser struct {
-	regex *regexp.Regexp
+	regex      *regexp.Regexp
+	timeLayout string
 }
 
 func NewParser() *Parser {
@@ -148,7 +190,8 @@ func NewParser() *Parser {
 	)
 
 	return &Parser{
-		regex: regex,
+		regex:      regex,
+		timeLayout: "02/Jan/2006:15:04:05 -0700",
 	}
 }
 
@@ -158,9 +201,7 @@ func (p *Parser) lineToLog(line string) (log, error) {
 		return log{}, NewErrRegexp("failed to parse log line with regexp")
 	}
 
-	timeLayout := "02/Jan/2006:15:04:05 -0700"
-
-	parsedTime, err := time.Parse(timeLayout, matches[3])
+	parsedTime, err := time.Parse(p.timeLayout, matches[3])
 	if err != nil {
 		return log{}, fmt.Errorf("failed to parse time: %w", err)
 	}
@@ -515,8 +556,9 @@ func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
 	fmt.Fprint(out, "|:-|-:|\n")
 	fmt.Fprintf(out, "| Files | %s |\n", strings.Join(info.Paths, ", "))
 	fmt.Fprintf(out, "| Number of requests | %d |\n", info.TotalRequests)
-	fmt.Fprintf(out, "| Average Response Size | %d |\n", info.AvgResponseSize)
-	fmt.Fprintf(out, "| 95th Percentile of Response Size | %d |\n\n", info.ResponseSize95p)
+	fmt.Fprintf(out, "| Average response size | %d |\n", info.AvgResponseSize)
+	fmt.Fprintf(out, "| 95th Percentile of response size | %d |\n", info.ResponseSize95p)
+	fmt.Fprintf(out, "| Average requests per day | %d |\n\n", info.AvgResponsePerDay)
 
 	fmt.Fprint(out, "#### Requested resources\n\n")
 	fmt.Fprint(out, "| Resource | Count |\n")
@@ -533,6 +575,14 @@ func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
 	for _, status := range info.FrequentStatuses {
 		fmt.Fprintf(out, "| %d | %s | %d |\n", status.Code, status.Name, status.Quantity)
 	}
+
+	fmt.Fprint(out, "#### Requesting addresses\n\n")
+	fmt.Fprint(out, "| Address | Count |\n")
+	fmt.Fprint(out, "|:-|-:|\n")
+
+	for _, address := range info.FrequentAddresses {
+		fmt.Fprintf(out, "| `%s` | %d |\n", address.Name, address.Quantity)
+	}
 }
 
 func (p *Parser) Adoc(info *domain.FileInfo, out io.Writer) {
@@ -542,9 +592,10 @@ func (p *Parser) Adoc(info *domain.FileInfo, out io.Writer) {
 	fmt.Fprint(out, "| Метрика | Значение\n")
 
 	fmt.Fprintf(out, "| Files | %s\n", strings.Join(info.Paths, ", "))
-	fmt.Fprintf(out, "| Number of Requests | %d\n", info.TotalRequests)
-	fmt.Fprintf(out, "| Average Response Size | %d\n", info.AvgResponseSize)
-	fmt.Fprintf(out, "| 95th Percentile of Response Size | %d\n", info.ResponseSize95p)
+	fmt.Fprintf(out, "| Number of requests | %d\n", info.TotalRequests)
+	fmt.Fprintf(out, "| Average response size | %d\n", info.AvgResponseSize)
+	fmt.Fprintf(out, "| 95th percentile of response size | %d\n", info.ResponseSize95p)
+	fmt.Fprintf(out, "| Average requests per day | %d |\n", info.AvgResponsePerDay)
 	fmt.Fprint(out, "|===\n\n")
 
 	fmt.Fprint(out, "==== Requested Resources\n\n")
@@ -565,6 +616,17 @@ func (p *Parser) Adoc(info *domain.FileInfo, out io.Writer) {
 
 	for _, status := range info.FrequentStatuses {
 		fmt.Fprintf(out, "| %d | %s | %d\n", status.Code, status.Name, status.Quantity)
+	}
+
+	fmt.Fprint(out, "|===\n\n")
+
+	fmt.Fprint(out, "==== Requesting addresses\n\n")
+	fmt.Fprint(out, "[options=\"header\"]\n")
+	fmt.Fprint(out, "|===\n")
+	fmt.Fprint(out, "| Name | Count\n")
+
+	for _, address := range info.FrequentAddresses {
+		fmt.Fprintf(out, "| %s | %d\n", address.Name, address.Quantity)
 	}
 
 	fmt.Fprint(out, "|===\n")

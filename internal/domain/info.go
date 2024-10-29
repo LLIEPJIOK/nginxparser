@@ -1,33 +1,32 @@
 package domain
 
 type FileInfo struct {
-	Paths            []string
-	TotalRequests    int
-	AvgResponseSize  int
-	ResponseSize95p  int
-	FrequentURLs     []URL
-	FrequentStatuses []Status
+	Paths             []string
+	TotalRequests     int
+	AvgResponseSize   int
+	ResponseSize95p   int
+	AvgResponsePerDay int
+	FrequentURLs      []URL
+	FrequentStatuses  []Status
+	FrequentAddresses []Address
 }
 
 func NewFileInfo(
 	paths []string,
-	totalRequests, avgResponseSize, responseSize95p int,
+	totalRequests, avgResponseSize, responseSize95p, avgResponsePerDay int,
 	frequentURLs []URL,
 	frequentStatuses []Status,
+	frequentAddresses []Address,
 ) *FileInfo {
-	frequentURLsCopy := make([]URL, len(frequentURLs))
-	copy(frequentURLsCopy, frequentURLs)
-
-	frequentStatusesCopy := make([]Status, len(frequentStatuses))
-	copy(frequentStatusesCopy, frequentStatuses)
-
 	return &FileInfo{
-		Paths:            paths,
-		TotalRequests:    totalRequests,
-		AvgResponseSize:  avgResponseSize,
-		ResponseSize95p:  responseSize95p,
-		FrequentURLs:     frequentURLsCopy,
-		FrequentStatuses: frequentStatusesCopy,
+		Paths:             paths,
+		TotalRequests:     totalRequests,
+		AvgResponseSize:   avgResponseSize,
+		ResponseSize95p:   responseSize95p,
+		AvgResponsePerDay: avgResponsePerDay,
+		FrequentURLs:      frequentURLs,
+		FrequentStatuses:  frequentStatuses,
+		FrequentAddresses: frequentAddresses,
 	}
 }
 
@@ -52,6 +51,18 @@ type Status struct {
 func NewStatus(code int, name string, quantity int) Status {
 	return Status{
 		Code:     code,
+		Name:     name,
+		Quantity: quantity,
+	}
+}
+
+type Address struct {
+	Name     string
+	Quantity int
+}
+
+func NewAddress(name string, quantity int) Address {
+	return Address{
 		Name:     name,
 		Quantity: quantity,
 	}
