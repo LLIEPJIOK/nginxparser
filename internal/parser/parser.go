@@ -235,6 +235,41 @@ func (p *Parser) lineToLog(line string) (log, error) {
 	}, nil
 }
 
+func fanIn[T any](
+	ctx context.Context,
+	eg *errgroup.Group,
+	chs ...<-chan T,
+) <-chan T {
+	wg := &sync.WaitGroup{}
+	out := make(chan T)
+
+	for _, ch := range chs {
+		wg.Add(1)
+
+		eg.Go(func() error {
+			defer wg.Done()
+
+			for lg := range ch {
+				select {
+				case out <- lg:
+
+				case <-ctx.Done():
+					return nil
+				}
+			}
+
+			return nil
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(out)
+	}()
+
+	return out
+}
+
 func (p *Parser) read(ctx context.Context, eg *errgroup.Group, reader io.ReadCloser) <-chan line {
 	lines := make(chan line)
 
@@ -275,42 +310,6 @@ func (p *Parser) parseFilesFanOut(
 	}
 
 	return chs
-}
-
-func (p *Parser) parseFilesFanIn(
-	ctx context.Context,
-	eg *errgroup.Group,
-	chs ...<-chan line,
-) <-chan line {
-	lines := make(chan line)
-
-	wg := &sync.WaitGroup{}
-
-	for _, ch := range chs {
-		wg.Add(1)
-
-		eg.Go(func() error {
-			defer wg.Done()
-
-			for l := range ch {
-				select {
-				case lines <- l:
-
-				case <-ctx.Done():
-					return nil
-				}
-			}
-
-			return nil
-		})
-	}
-
-	go func() {
-		wg.Wait()
-		close(lines)
-	}()
-
-	return lines
 }
 
 func (p *Parser) convertLine(
@@ -359,41 +358,6 @@ func (p *Parser) convertLineFanOut(
 	return chs
 }
 
-func (p *Parser) convertLineFanIn(
-	ctx context.Context,
-	eg *errgroup.Group,
-	chs ...<-chan log,
-) <-chan log {
-	wg := &sync.WaitGroup{}
-	logs := make(chan log)
-
-	for _, ch := range chs {
-		wg.Add(1)
-
-		eg.Go(func() error {
-			defer wg.Done()
-
-			for lg := range ch {
-				select {
-				case logs <- lg:
-
-				case <-ctx.Done():
-					return nil
-				}
-			}
-
-			return nil
-		})
-	}
-
-	go func() {
-		wg.Wait()
-		close(logs)
-	}()
-
-	return logs
-}
-
 func (p *Parser) filterTime(
 	ctx context.Context,
 	eg *errgroup.Group,
@@ -440,41 +404,6 @@ func (p *Parser) filterTimeFanOut(
 	}
 
 	return chs
-}
-
-func (p *Parser) filterTimeFanIn(
-	ctx context.Context,
-	eg *errgroup.Group,
-	chs ...<-chan log,
-) <-chan log {
-	wg := &sync.WaitGroup{}
-	logs := make(chan log)
-
-	for _, ch := range chs {
-		wg.Add(1)
-
-		eg.Go(func() error {
-			defer wg.Done()
-
-			for lg := range ch {
-				select {
-				case logs <- lg:
-
-				case <-ctx.Done():
-					return nil
-				}
-			}
-
-			return nil
-		})
-	}
-
-	go func() {
-		wg.Wait()
-		close(logs)
-	}()
-
-	return logs
 }
 
 func matchLogByField(logEntry *log, filed, pattern string) (bool, error) {
@@ -586,41 +515,6 @@ func (p *Parser) filterFieldFanOut(
 	return chs
 }
 
-func (p *Parser) filterFieldFanIn(
-	ctx context.Context,
-	eg *errgroup.Group,
-	chs ...<-chan log,
-) <-chan log {
-	wg := &sync.WaitGroup{}
-	logs := make(chan log)
-
-	for _, ch := range chs {
-		wg.Add(1)
-
-		eg.Go(func() error {
-			defer wg.Done()
-
-			for lg := range ch {
-				select {
-				case logs <- lg:
-
-				case <-ctx.Done():
-					return nil
-				}
-			}
-
-			return nil
-		})
-	}
-
-	go func() {
-		wg.Wait()
-		close(logs)
-	}()
-
-	return logs
-}
-
 func (p *Parser) collect(
 	ctx context.Context,
 	eg *errgroup.Group,
@@ -689,15 +583,15 @@ func (p *Parser) Parse(prm Params) (*domain.FileInfo, error) {
 
 		defer closeFiles(files)
 
-		lines = p.parseFilesFanIn(ctx, eg, p.parseFilesFanOut(ctx, eg, files)...)
+		lines = fanIn(ctx, eg, p.parseFilesFanOut(ctx, eg, files)...)
 	}
 
-	filterTimeChan := p.convertLineFanIn(ctx, eg, p.convertLineFanOut(ctx, eg, lines)...)
-	filterFieldChan := p.filterFieldFanIn(
+	filterTimeChan := fanIn(ctx, eg, p.convertLineFanOut(ctx, eg, lines)...)
+	filterFieldChan := fanIn(
 		ctx,
 		eg,
 		p.filterFieldFanOut(ctx, eg, prm.FilterField, prm.FilterValue, filterTimeChan)...)
-	collectChan := p.filterTimeFanIn(
+	collectChan := fanIn(
 		ctx,
 		eg,
 		p.filterTimeFanOut(ctx, eg, prm.From, prm.To, filterFieldChan)...)
