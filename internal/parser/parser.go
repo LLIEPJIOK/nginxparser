@@ -108,7 +108,7 @@ func frequentStatuses(parseData *data) []domain.Status {
 	for status, quantity := range parseData.statuses {
 		frequentStatuses = append(
 			frequentStatuses,
-			domain.NewStatus(status, http.StatusText(status), quantity),
+			domain.NewStatus(status, quantity),
 		)
 	}
 
@@ -222,16 +222,16 @@ func (p *Parser) lineToLog(line string) (log, error) {
 	}
 
 	return log{
-		remoteAddress: matches[1],
-		remoteUser:    matches[2],
-		timeLocal:     parsedTime,
-		method:        matches[4],
-		url:           matches[5],
-		httpVersion:   matches[6],
-		status:        status,
-		bodyBytesSend: bodyBytesSent,
-		referer:       matches[9],
-		userAgent:     matches[10],
+		RemoteAddress: matches[1],
+		RemoteUser:    matches[2],
+		TimeLocal:     parsedTime,
+		Method:        matches[4],
+		URL:           matches[5],
+		HTTPVersion:   matches[6],
+		Status:        status,
+		BodyBytesSend: bodyBytesSent,
+		Referer:       matches[9],
+		UserAgent:     matches[10],
 	}, nil
 }
 
@@ -406,8 +406,8 @@ func (p *Parser) filterTime(
 		defer close(finalChan)
 
 		for lg := range filterChan {
-			if from != nil && from.After(lg.timeLocal) ||
-				to != nil && to.Before(lg.timeLocal.Truncate(24*time.Hour)) {
+			if from != nil && from.After(lg.TimeLocal) ||
+				to != nil && to.Before(lg.TimeLocal.Truncate(24*time.Hour)) {
 				continue
 			}
 
@@ -496,7 +496,7 @@ func matchLogByField(logEntry *log, filed, pattern string) (bool, error) {
 	case reflect.Struct:
 		if fieldValue.Type() == reflect.TypeOf(time.Time{}) {
 			tm := fieldValue.Interface().(time.Time)
-			value = tm.Format(time.Layout)
+			value = tm.Format(timeLayout)
 		}
 
 	case reflect.Invalid,
@@ -530,6 +530,8 @@ func matchLogByField(logEntry *log, filed, pattern string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("error matching regex: %w", err)
 	}
+
+	fmt.Println(pattern, value, matched)
 
 	return matched, nil
 }

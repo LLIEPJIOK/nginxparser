@@ -1,5 +1,7 @@
 package domain
 
+import "net/http"
+
 type FileInfo struct {
 	Paths             []string
 	TotalRequests     int
@@ -48,10 +50,10 @@ type Status struct {
 	Quantity int
 }
 
-func NewStatus(code int, name string, quantity int) Status {
+func NewStatus(code, quantity int) Status {
 	return Status{
 		Code:     code,
-		Name:     name,
+		Name:     http.StatusText(code),
 		Quantity: quantity,
 	}
 }

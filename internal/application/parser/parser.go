@@ -12,16 +12,16 @@ import (
 
 const possibleFilterFields = `
 Possible fields for filtration: 
-  - remoteAddress
-  - remoteUser
-  - timeLocal
-  - method
-  - url
-  - httpVersion
-  - status
-  - bodyBytesSend
-  - referer
-  - userAgent
+  - RemoteAddress
+  - RemoteUser
+  - TimeLocal
+  - Method
+  - Url
+  - HTTPVersion
+  - Status
+  - BodyBytesSend
+  - Referer
+  - UserAgent
 
 `
 

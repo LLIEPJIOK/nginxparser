@@ -43,7 +43,7 @@ func TestParseFile(t *testing.T) {
 				),
 			},
 			frequentStatuses: []domain.Status{
-				domain.NewStatus(http.StatusOK, http.StatusText(http.StatusOK), 1),
+				domain.NewStatus(200, 1),
 			},
 			frequentAddresses: []domain.Address{domain.NewAddress("130.41.23.21", 1)},
 		},
@@ -82,13 +82,12 @@ func TestParseFile(t *testing.T) {
 				domain.NewURL("/Digitized/open%20system_hierarchy/moratorium.php", 1),
 			},
 			frequentStatuses: []domain.Status{
-				domain.NewStatus(http.StatusOK, http.StatusText(http.StatusOK), 3),
+				domain.NewStatus(200, 3),
 				domain.NewStatus(
-					http.StatusMultipleChoices,
-					http.StatusText(http.StatusMultipleChoices),
+					300,
 					1,
 				),
-				domain.NewStatus(http.StatusNotFound, http.StatusText(http.StatusNotFound), 1),
+				domain.NewStatus(404, 1),
 			},
 			frequentAddresses: []domain.Address{
 				domain.NewAddress("192.93.214.163", 4),
@@ -180,13 +179,12 @@ func TestParseMultipleFiles(t *testing.T) {
 				domain.NewURL("/Digitized/open%20system_hierarchy/moratorium.php", 1),
 			},
 			frequentStatuses: []domain.Status{
-				domain.NewStatus(http.StatusOK, http.StatusText(http.StatusOK), 3),
+				domain.NewStatus(200, 3),
 				domain.NewStatus(
-					http.StatusMultipleChoices,
-					http.StatusText(http.StatusMultipleChoices),
+					300,
 					1,
 				),
-				domain.NewStatus(http.StatusNotFound, http.StatusText(http.StatusNotFound), 1),
+				domain.NewStatus(404, 1),
 			},
 			frequentAddresses: []domain.Address{
 				domain.NewAddress("192.93.214.163", 2),
@@ -283,7 +281,7 @@ func TestParseFileWithTimeFilter(t *testing.T) {
 				domain.NewURL("/client-server-architecture.htm", 1),
 			},
 			frequentStatuses: []domain.Status{
-				domain.NewStatus(http.StatusOK, http.StatusText(http.StatusOK), 2),
+				domain.NewStatus(200, 2),
 			},
 			frequentAddresses: []domain.Address{
 				domain.NewAddress("174.118.205.41", 1),
@@ -326,8 +324,8 @@ func TestParseFileWithTimeFilter(t *testing.T) {
 				domain.NewURL("/reciprocal/complexity.css", 1),
 			},
 			frequentStatuses: []domain.Status{
-				domain.NewStatus(http.StatusOK, http.StatusText(http.StatusOK), 2),
-				domain.NewStatus(http.StatusNotFound, http.StatusText(http.StatusNotFound), 1),
+				domain.NewStatus(200, 2),
+				domain.NewStatus(404, 1),
 			},
 			frequentAddresses: []domain.Address{domain.NewAddress("8.177.148.191", 3)},
 		},
@@ -344,6 +342,238 @@ func TestParseFileWithTimeFilter(t *testing.T) {
 				Path: fileName,
 				From: tc.from,
 				To:   tc.to,
+			})
+			require.NoError(t, err, "file must be parsed")
+
+			assert.Equal(t, tc.totalRequests, data.TotalRequests)
+			assert.Equal(t, tc.avgResponseSize, data.AvgResponseSize)
+			assert.Equal(t, tc.responseSize95p, data.ResponseSize95p)
+			assert.Equal(t, tc.avgRequestsPerDay, data.AvgResponsePerDay)
+			assert.Equal(t, tc.frequentURLs, data.FrequentURLs)
+			assert.Equal(t, tc.frequentStatuses, data.FrequentStatuses)
+			assert.Equal(t, tc.frequentAddresses, data.FrequentAddresses)
+		})
+	}
+}
+
+func TestParseFileWithFieldFilter(t *testing.T) {
+	tt := []struct {
+		name              string
+		content           string
+		field             string
+		value             string
+		totalRequests     int
+		avgResponseSize   int
+		avgRequestsPerDay int
+		responseSize95p   int
+		frequentURLs      []domain.URL
+		frequentStatuses  []domain.Status
+		frequentAddresses []domain.Address
+	}{
+		{
+			name: "only field",
+			content: `130.41.23.21 - - [22/Oct/2024:09:48:45 +0000] ` +
+				`"GET /clear-thinking%20Streamlined/architecture/background%20analyzing.gif ` +
+				`HTTP/1.1" 200 2232 "-" ` +
+				`"Opera/10.89 (Windows 98; Win 9x 4.90; en-US) ` +
+				`Presto/2.13.253 Version/12.00"`,
+			field:             "method",
+			value:             "",
+			totalRequests:     1,
+			avgResponseSize:   2232,
+			responseSize95p:   2232,
+			avgRequestsPerDay: 1,
+			frequentURLs: []domain.URL{
+				domain.NewURL(
+					"/clear-thinking%20Streamlined/architecture/background%20analyzing.gif",
+					1,
+				),
+			},
+			frequentStatuses:  []domain.Status{domain.NewStatus(200, 1)},
+			frequentAddresses: []domain.Address{domain.NewAddress("130.41.23.21", 1)},
+		},
+		{
+			name: "only value",
+			content: `130.41.23.21 - - [22/Oct/2024:09:48:45 +0000] ` +
+				`"GET /clear-thinking%20Streamlined/architecture/background%20analyzing.gif ` +
+				`HTTP/1.1" 200 2232 "-" ` +
+				`"Opera/10.89 (Windows 98; Win 9x 4.90; en-US) ` +
+				`Presto/2.13.253 Version/12.00"`,
+			field:             "",
+			value:             "value",
+			totalRequests:     1,
+			avgResponseSize:   2232,
+			responseSize95p:   2232,
+			avgRequestsPerDay: 1,
+			frequentURLs: []domain.URL{
+				domain.NewURL(
+					"/clear-thinking%20Streamlined/architecture/background%20analyzing.gif",
+					1,
+				),
+			},
+			frequentStatuses:  []domain.Status{domain.NewStatus(200, 1)},
+			frequentAddresses: []domain.Address{domain.NewAddress("130.41.23.21", 1)},
+		},
+		{
+			name: "Method",
+			content: `130.41.23.21 - - [22/Oct/2024:09:48:45 +0000] ` +
+				`"GET /clear-thinking%20Streamlined/architecture/background%20analyzing.gif ` +
+				`HTTP/1.1" 200 2232 "-" ` +
+				`"Opera/10.89 (Windows 98; Win 9x 4.90; en-US) ` +
+				`Presto/2.13.253 Version/12.00"`,
+			field:             "Method",
+			value:             "POST",
+			totalRequests:     0,
+			avgResponseSize:   0,
+			responseSize95p:   0,
+			avgRequestsPerDay: 0,
+			frequentURLs:      nil,
+			frequentStatuses:  nil,
+			frequentAddresses: nil,
+		},
+		{
+			name: "TimeLocal",
+			content: `6.60.120.55 - - [23/Oct/2024:09:48:45 +0000] "HEAD /client-server-architecture.htm ` +
+				`HTTP/1.1" 200 1286 "-" ` +
+				`"Mozilla/5.0 (Windows; U; Windows NT 5.0) AppleWebKit/534.40.6 ` +
+				`(KHTML, like Gecko) Version/4.0 Safari/534.40.6"` + "\n" +
+
+				`174.118.205.41 - - [24/Oct/2024:09:48:45 +0000] "POST /Synchronised/mission-critical.jpg ` +
+				`HTTP/1.1" 200 2739 "-" "Mozilla/5.0 (Windows NT 4.0) AppleWebKit/5330 ` +
+				`(KHTML, like Gecko) Chrome/40.0.836.0 Mobile Safari/5330"` + "\n" +
+
+				`5.69.24.249 - - [25/Oct/2024:09:48:45 +0000] "POST /Expanded-3rd%20generation-Ergonomic/bandwidth-monitored-pricing%20structure.php ` +
+				`HTTP/1.1" 200 1354 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_7_5) AppleWebKit/5341 ` +
+				`(KHTML, like Gecko) Chrome/39.0.819.0 Mobile Safari/5341"` + "\n" +
+
+				`172.227.236.171 - - [26/Oct/2024:09:48:45 +0000] "GET /time-frame%20secondary/encryption/secondary.php ` +
+				`HTTP/1.1" 200 2415 "-" "Mozilla/5.0 (X11; Linux i686; rv:7.0) ` +
+				`Gecko/1946-01-05 Firefox/36.0"` + "\n" +
+
+				`124.254.231.79 - - [27/Oct/2024:09:48:45 +0000] "PUT /Customizable/complexity%20matrix-Graphical%20User%20Interface.svg ` +
+				`HTTP/1.1" 200 1844 "-" "Mozilla/5.0 (Macintosh; PPC Mac OS X 10_7_7 rv:6.0; en-US) AppleWebKit/533.23.2 ` +
+				`(KHTML, like Gecko) Version/4.2 Safari/533.23.2"`,
+			field:             "TimeLocal",
+			value:             "25/Oct/2024",
+			totalRequests:     1,
+			avgResponseSize:   1354,
+			responseSize95p:   1354,
+			avgRequestsPerDay: 1,
+			frequentURLs: []domain.URL{
+				domain.NewURL(
+					"/Expanded-3rd%20generation-Ergonomic/bandwidth-monitored-pricing%20structure.php",
+					1,
+				),
+			},
+			frequentStatuses: []domain.Status{
+				domain.NewStatus(200, 1),
+			},
+			frequentAddresses: []domain.Address{
+				domain.NewAddress("5.69.24.249", 1),
+			},
+		},
+		{
+			name: "RemoteAddress",
+			content: `33.114.0.221 - - [22/Oct/2024:09:48:45 +0000] "HEAD /Digitized/open%20system_hierarchy/moratorium.php ` +
+				`HTTP/1.1" 200 2418 "-" ` +
+				`"Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_8_7) AppleWebKit/5332 ` +
+				`(KHTML, like Gecko) Chrome/37.0.891.0 Mobile Safari/5332"` + "\n" +
+
+				`8.177.148.191 - - [23/Oct/2024:09:48:45 +0000] "GET /reciprocal/complexity.css ` +
+				`HTTP/1.1" 200 2668 "-" ` +
+				`"Mozilla/5.0 (Windows 95) AppleWebKit/5322 ` +
+				`(KHTML, like Gecko) Chrome/37.0.824.0 Mobile Safari/5322"` + "\n" +
+
+				`8.177.148.191 - - [24/Oct/2024:09:48:45 +0000] "GET /Triple-buffered.jpg ` +
+				`HTTP/1.1" 200 922 "-" ` +
+				`"Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/2024-12-09 Firefox/35.0"` + "\n" +
+
+				`8.177.148.191 - - [25/Oct/2024:09:48:45 +0000] "HEAD /Triple-buffered.jpg ` +
+				`HTTP/1.1" 404 92 "-" ` +
+				`"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_0) AppleWebKit/5330 ` +
+				`(KHTML, like Gecko) Chrome/38.0.825.0 Mobile Safari/5330"` + "\n" +
+
+				`192.93.214.163 - - [26/Oct/2024:09:48:45 +0000] "POST /reciprocal/complexity.css ` +
+				`HTTP/1.1" 300 2814 "-" ` +
+				`"Mozilla/5.0 (X11; Linux i686) AppleWebKit/5330 ` +
+				`(KHTML, like Gecko) Chrome/37.0.829.0 Mobile Safari/5330"`,
+			field:             "RemoteAddress",
+			value:             "^[83].*",
+			totalRequests:     4,
+			avgResponseSize:   1525,
+			responseSize95p:   2668,
+			avgRequestsPerDay: 1,
+			frequentURLs: []domain.URL{
+				domain.NewURL("/Triple-buffered.jpg", 2),
+				domain.NewURL("/Digitized/open%20system_hierarchy/moratorium.php", 1),
+				domain.NewURL("/reciprocal/complexity.css", 1),
+			},
+			frequentStatuses: []domain.Status{
+				domain.NewStatus(200, 3),
+				domain.NewStatus(404, 1),
+			},
+			frequentAddresses: []domain.Address{
+				domain.NewAddress("8.177.148.191", 3),
+				domain.NewAddress("33.114.0.221", 1),
+			},
+		},
+		{
+			name: "Status",
+			content: `33.114.0.221 - - [22/Oct/2024:09:48:45 +0000] "HEAD /Digitized/open%20system_hierarchy/moratorium.php ` +
+				`HTTP/1.1" 200 2418 "-" ` +
+				`"Mozilla/5.0 (Macintosh; U; PPC Mac OS X 10_8_7) AppleWebKit/5332 ` +
+				`(KHTML, like Gecko) Chrome/37.0.891.0 Mobile Safari/5332"` + "\n" +
+
+				`8.177.148.191 - - [23/Oct/2024:09:48:45 +0000] "GET /reciprocal/complexity.css ` +
+				`HTTP/1.1" 200 2668 "-" ` +
+				`"Mozilla/5.0 (Windows 95) AppleWebKit/5322 ` +
+				`(KHTML, like Gecko) Chrome/37.0.824.0 Mobile Safari/5322"` + "\n" +
+
+				`8.177.148.191 - - [24/Oct/2024:09:48:45 +0000] "GET /Triple-buffered.jpg ` +
+				`HTTP/1.1" 200 922 "-" ` +
+				`"Mozilla/5.0 (X11; Linux i686; rv:8.0) Gecko/2024-12-09 Firefox/35.0"` + "\n" +
+
+				`8.177.148.191 - - [25/Oct/2024:09:48:45 +0000] "HEAD /Triple-buffered.jpg ` +
+				`HTTP/1.1" 404 92 "-" ` +
+				`"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_9_0) AppleWebKit/5330 ` +
+				`(KHTML, like Gecko) Chrome/38.0.825.0 Mobile Safari/5330"` + "\n" +
+
+				`192.93.214.163 - - [25/Oct/2024:09:48:45 +0000] "POST /reciprocal/complexity.css ` +
+				`HTTP/1.1" 304 2814 "-" ` +
+				`"Mozilla/5.0 (X11; Linux i686) AppleWebKit/5330 ` +
+				`(KHTML, like Gecko) Chrome/37.0.829.0 Mobile Safari/5330"`,
+			field:             "Status",
+			value:             ".04",
+			totalRequests:     2,
+			avgResponseSize:   1453,
+			responseSize95p:   2814,
+			avgRequestsPerDay: 2,
+			frequentURLs: []domain.URL{
+				domain.NewURL("/Triple-buffered.jpg", 1),
+				domain.NewURL("/reciprocal/complexity.css", 1),
+			},
+			frequentStatuses: []domain.Status{
+				domain.NewStatus(304, 1),
+				domain.NewStatus(404, 1),
+			},
+			frequentAddresses: []domain.Address{
+				domain.NewAddress("192.93.214.163", 1),
+				domain.NewAddress("8.177.148.191", 1),
+			},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			fileName := createTestFiles(t, tc.content)
+			defer deleteTestFiles(t, getRoot(fileName))
+
+			logParser := parser.NewParser()
+
+			data, err := logParser.Parse(parser.Params{
+				Path:        fileName,
+				FilterField: tc.field,
+				FilterValue: tc.value,
 			})
 			require.NoError(t, err, "file must be parsed")
 
@@ -458,7 +688,7 @@ func TestParseURL(t *testing.T) {
 				),
 				domain.NewURL("/methodology/systemic_Phased-user-facing.php", 1),
 			},
-			frequentStatuses: []domain.Status{domain.NewStatus(200, http.StatusText(200), 2)},
+			frequentStatuses: []domain.Status{domain.NewStatus(200, 2)},
 			frequentAddresses: []domain.Address{
 				domain.NewAddress("219.251.118.203", 1),
 				domain.NewAddress("45.175.78.55", 1),

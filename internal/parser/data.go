@@ -37,10 +37,10 @@ func (d *data) processLog(logEntry *log) {
 	defer d.mu.Unlock()
 
 	d.totalRequests++
-	d.urls[logEntry.url]++
-	d.statuses[logEntry.status]++
-	d.sizeSum += logEntry.bodyBytesSend
-	d.sizeSlice = append(d.sizeSlice, logEntry.bodyBytesSend)
-	d.addresses[logEntry.remoteAddress]++
-	d.requestsPerDay[logEntry.timeLocal.Format(timeLayout)]++
+	d.urls[logEntry.URL]++
+	d.statuses[logEntry.Status]++
+	d.sizeSum += logEntry.BodyBytesSend
+	d.sizeSlice = append(d.sizeSlice, logEntry.BodyBytesSend)
+	d.addresses[logEntry.RemoteAddress]++
+	d.requestsPerDay[logEntry.TimeLocal.Format(timeLayout)]++
 }

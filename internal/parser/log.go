@@ -3,14 +3,14 @@ package parser
 import "time"
 
 type log struct {
-	remoteAddress string
-	remoteUser    string
-	timeLocal     time.Time
-	method        string
-	url           string
-	httpVersion   string
-	status        int
-	bodyBytesSend int
-	referer       string
-	userAgent     string
+	RemoteAddress string
+	RemoteUser    string
+	TimeLocal     time.Time
+	Method        string
+	URL           string
+	HTTPVersion   string
+	Status        int
+	BodyBytesSend int
+	Referer       string
+	UserAgent     string
 }
