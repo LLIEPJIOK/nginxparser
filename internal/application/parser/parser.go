@@ -10,15 +10,34 @@ import (
 	"github.com/es-debug/backend-academy-2024-go-template/internal/parser"
 )
 
+const possibleFilterFields = `
+Possible fields for filtration: 
+  - remoteAddress
+  - remoteUser
+  - timeLocal
+  - method
+  - url
+  - httpVersion
+  - status
+  - bodyBytesSend
+  - referer
+  - userAgent
+
+`
+
 func Start() error {
 	fl, err := readCMDFlags()
 	if err != nil {
 		flag.Usage()
+		fmt.Print(possibleFilterFields)
+
 		return fmt.Errorf("readCMDFlags(): %w", err)
 	}
 
 	if fl.help {
 		flag.Usage()
+		fmt.Print(possibleFilterFields)
+
 		return nil
 	}
 
