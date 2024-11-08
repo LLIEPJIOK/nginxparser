@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+const dataLayout = "2006-01-02"
+
 type cmdFlags struct {
 	path     string
 	format   string
@@ -14,6 +16,22 @@ type cmdFlags struct {
 	help     bool
 	timeFrom *time.Time
 	timeTo   *time.Time
+
+	filterField string
+	filterValue string
+}
+
+func parseTime(timeStr string) (*time.Time, error) {
+	if timeStr != "" {
+		tm, err := time.Parse(dataLayout, timeStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse time: %w", err)
+		}
+
+		return &tm, nil
+	}
+
+	return nil, nil
 }
 
 func readCMDFlags() (cmdFlags, error) {
@@ -25,8 +43,13 @@ func readCMDFlags() (cmdFlags, error) {
 		output string
 		help   bool
 
+		filterField string
+		filterValue string
+
 		timeFrom *time.Time
 		timeTo   *time.Time
+
+		err error
 	)
 
 	flag.StringVar(&path, "path", "", "path to file")
@@ -47,42 +70,39 @@ func readCMDFlags() (cmdFlags, error) {
 	flag.BoolVar(&help, "help", false, "commands info")
 	flag.BoolVar(&help, "h", false, "commands info")
 
+	flag.StringVar(&filterField, "filter-field", "", "field for filtration")
+	flag.StringVar(&filterValue, "filter-value", "", "value for filtration")
+
 	flag.Parse()
 
 	if help {
-		return cmdFlags{
-			help: true,
-		}, nil
+		return cmdFlags{help: true}, nil
 	}
 
 	if path == "" {
 		return cmdFlags{}, ErrEmptyLogPath{}
 	}
 
-	if from != "" {
-		tm, err := time.Parse(dataLayout, from)
-		if err != nil {
-			return cmdFlags{}, fmt.Errorf("parse from date: %w", err)
-		}
-
-		timeFrom = &tm
+	timeFrom, err = parseTime(from)
+	if err != nil {
+		return cmdFlags{}, fmt.Errorf("parse time from %q: %w", from, err)
 	}
 
-	if from != "" {
-		tm, err := time.Parse(dataLayout, from)
-		if err != nil {
-			return cmdFlags{}, fmt.Errorf("parse to date: %w", err)
-		}
-
-		timeTo = &tm
+	timeTo, err = parseTime(to)
+	if err != nil {
+		return cmdFlags{}, fmt.Errorf("parse time to %q: %w", to, err)
 	}
+
+	fmt.Println(filterField, filterValue)
 
 	return cmdFlags{
-		path:     path,
-		format:   strings.ToLower(format),
-		output:   output,
-		help:     help,
-		timeFrom: timeFrom,
-		timeTo:   timeTo,
+		path:        path,
+		format:      strings.ToLower(format),
+		output:      output,
+		help:        help,
+		timeFrom:    timeFrom,
+		timeTo:      timeTo,
+		filterField: filterField,
+		filterValue: filterValue,
 	}, nil
 }

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -405,7 +406,8 @@ func (p *Parser) filterTime(
 		defer close(finalChan)
 
 		for lg := range filterChan {
-			if from != nil && from.After(lg.timeLocal) || to != nil && to.Before(lg.timeLocal.Truncate(24*time.Hour)) {
+			if from != nil && from.After(lg.timeLocal) ||
+				to != nil && to.Before(lg.timeLocal.Truncate(24*time.Hour)) {
 				continue
 			}
 
@@ -440,7 +442,11 @@ func (p *Parser) filterTimeFanOut(
 	return chs
 }
 
-func (p *Parser) filterTimeFanIn(eg *errgroup.Group, chs ...<-chan log) <-chan log {
+func (p *Parser) filterTimeFanIn(
+	ctx context.Context,
+	eg *errgroup.Group,
+	chs ...<-chan log,
+) <-chan log {
 	wg := &sync.WaitGroup{}
 	logs := make(chan log)
 
@@ -451,7 +457,154 @@ func (p *Parser) filterTimeFanIn(eg *errgroup.Group, chs ...<-chan log) <-chan l
 			defer wg.Done()
 
 			for lg := range ch {
-				logs <- lg
+				select {
+				case logs <- lg:
+
+				case <-ctx.Done():
+					return nil
+				}
+			}
+
+			return nil
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(logs)
+	}()
+
+	return logs
+}
+
+func matchLogByField(logEntry *log, filed, pattern string) (bool, error) {
+	fieldValue := reflect.ValueOf(*logEntry).FieldByName(filed)
+
+	if !fieldValue.IsValid() {
+		return true, nil
+	}
+
+	var value string
+
+	switch fieldValue.Kind() {
+	case reflect.String:
+		value = fieldValue.String()
+
+	case reflect.Int:
+		value = fmt.Sprintf("%d", fieldValue.Int())
+
+	case reflect.Struct:
+		if fieldValue.Type() == reflect.TypeOf(time.Time{}) {
+			tm := fieldValue.Interface().(time.Time)
+			value = tm.Format(time.Layout)
+		}
+
+	case reflect.Invalid,
+		reflect.Bool,
+		reflect.Int8,
+		reflect.Int16,
+		reflect.Int32,
+		reflect.Int64,
+		reflect.Uint,
+		reflect.Uint8,
+		reflect.Uint16,
+		reflect.Uint32,
+		reflect.Uint64,
+		reflect.Uintptr,
+		reflect.Float32,
+		reflect.Float64,
+		reflect.Complex64,
+		reflect.Complex128,
+		reflect.Array,
+		reflect.Chan,
+		reflect.Func,
+		reflect.Interface,
+		reflect.Map,
+		reflect.Pointer,
+		reflect.Slice,
+		reflect.UnsafePointer:
+		return false, nil
+	}
+
+	matched, err := regexp.MatchString(pattern, value)
+	if err != nil {
+		return false, fmt.Errorf("error matching regex: %w", err)
+	}
+
+	return matched, nil
+}
+
+func (p *Parser) filterField(
+	ctx context.Context,
+	eg *errgroup.Group,
+	field, value string,
+	filterChan <-chan log,
+) <-chan log {
+	finalChan := make(chan log)
+
+	eg.Go(func() error {
+		defer close(finalChan)
+
+		for lg := range filterChan {
+			match, err := matchLogByField(&lg, field, value)
+			if err != nil {
+				return fmt.Errorf("matching log by field=%q with value = %q: %w", field, value, err)
+			}
+
+			if match {
+				select {
+				case finalChan <- lg:
+
+				case <-ctx.Done():
+					return nil
+				}
+			}
+		}
+
+		return nil
+	})
+
+	return finalChan
+}
+
+const filterFieldGoroutines = 2
+
+func (p *Parser) filterFieldFanOut(
+	ctx context.Context,
+	eg *errgroup.Group,
+	field, value string,
+	filterChan <-chan log,
+) []<-chan log {
+	chs := make([]<-chan log, filterFieldGoroutines)
+
+	for i := range filterTimeGoroutines {
+		chs[i] = p.filterField(ctx, eg, field, value, filterChan)
+	}
+
+	return chs
+}
+
+func (p *Parser) filterFieldFanIn(
+	ctx context.Context,
+	eg *errgroup.Group,
+	chs ...<-chan log,
+) <-chan log {
+	wg := &sync.WaitGroup{}
+	logs := make(chan log)
+
+	for _, ch := range chs {
+		wg.Add(1)
+
+		eg.Go(func() error {
+			defer wg.Done()
+
+			for lg := range ch {
+				select {
+				case logs <- lg:
+
+				case <-ctx.Done():
+					return nil
+				}
 			}
 
 			return nil
@@ -502,13 +655,13 @@ func (p *Parser) collectFanOut(
 	}
 }
 
-func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, error) {
+func (p *Parser) Parse(prm Params) (*domain.FileInfo, error) {
 	var lines <-chan line
 
 	parseData := newData()
 	eg, ctx := errgroup.WithContext(context.Background())
 
-	if pathURL, err := parseURL(path); err == nil {
+	if pathURL, err := parseURL(prm.Path); err == nil {
 		resp, err := http.Get(pathURL.String())
 		if err != nil {
 			return nil, fmt.Errorf("get file from url: %w", err)
@@ -518,18 +671,18 @@ func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, erro
 
 		lines = p.read(ctx, eg, resp.Body)
 	} else {
-		slog.Debug(fmt.Sprintf("parse %q as url: %s", path, err))
+		slog.Debug(fmt.Sprintf("parse %q as url: %s", prm.Path, err))
 
-		paths, err := filepath.Glob(path)
+		paths, err := filepath.Glob(prm.Path)
 		if err != nil {
-			return nil, fmt.Errorf("find files for pattern %q: %w", path, err)
+			return nil, fmt.Errorf("find files for pattern %q: %w", prm.Path, err)
 		}
 
 		parseData.paths = paths
 
 		files, err := getFiles(paths)
 		if err != nil {
-			return nil, fmt.Errorf("getFiles(%q): %w", path, err)
+			return nil, fmt.Errorf("getFiles(%q): %w", prm.Path, err)
 		}
 
 		defer closeFiles(files)
@@ -537,8 +690,15 @@ func (p *Parser) Parse(path string, from, to *time.Time) (*domain.FileInfo, erro
 		lines = p.parseFilesFanIn(ctx, eg, p.parseFilesFanOut(ctx, eg, files)...)
 	}
 
-	filterChan := p.convertLineFanIn(ctx, eg, p.convertLineFanOut(ctx, eg, lines)...)
-	collectChan := p.filterTimeFanIn(eg, p.filterTimeFanOut(ctx, eg, from, to, filterChan)...)
+	filterTimeChan := p.convertLineFanIn(ctx, eg, p.convertLineFanOut(ctx, eg, lines)...)
+	filterFieldChan := p.filterFieldFanIn(
+		ctx,
+		eg,
+		p.filterFieldFanOut(ctx, eg, prm.FilterField, prm.FilterValue, filterTimeChan)...)
+	collectChan := p.filterTimeFanIn(
+		ctx,
+		eg,
+		p.filterTimeFanOut(ctx, eg, prm.From, prm.To, filterFieldChan)...)
 	p.collectFanOut(ctx, eg, collectChan, &parseData)
 
 	if err := eg.Wait(); err != nil {

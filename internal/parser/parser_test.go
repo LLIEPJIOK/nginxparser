@@ -115,7 +115,9 @@ func TestParseFile(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			data, err := logParser.Parse(fileName, nil, nil)
+			data, err := logParser.Parse(parser.Params{
+				Path: fileName,
+			})
 			require.NoError(t, err, "file must be parsed")
 
 			assert.Equal(t, tc.totalRequests, data.TotalRequests)
@@ -201,7 +203,9 @@ func TestParseMultipleFiles(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			data, err := logParser.Parse(fileName, nil, nil)
+			data, err := logParser.Parse(parser.Params{
+				Path: fileName,
+			})
 			require.NoError(t, err, "file must be parsed")
 
 			assert.Equal(t, tc.totalRequests, data.TotalRequests)
@@ -336,7 +340,11 @@ func TestParseFileWithTimeFilter(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			data, err := logParser.Parse(fileName, tc.from, tc.to)
+			data, err := logParser.Parse(parser.Params{
+				Path: fileName,
+				From: tc.from,
+				To:   tc.to,
+			})
 			require.NoError(t, err, "file must be parsed")
 
 			assert.Equal(t, tc.totalRequests, data.TotalRequests)
@@ -384,7 +392,9 @@ func TestParseFileContentError(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			_, err := logParser.Parse(fileName, nil, nil)
+			_, err := logParser.Parse(parser.Params{
+				Path: fileName,
+			})
 			require.Error(t, err, "bad content")
 		})
 	}
@@ -405,7 +415,9 @@ func TestParseFileExistenceError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logParser := parser.NewParser()
 
-			_, err := logParser.Parse(tc.fileName, nil, nil)
+			_, err := logParser.Parse(parser.Params{
+				Path: tc.fileName,
+			})
 			require.Error(t, err, "bad content")
 		})
 	}
@@ -465,7 +477,9 @@ func TestParseURL(t *testing.T) {
 
 			logParser := parser.NewParser()
 
-			data, err := logParser.Parse(server.URL, nil, nil)
+			data, err := logParser.Parse(parser.Params{
+				Path: server.URL,
+			})
 			require.NoError(t, err, "must parse data from server")
 
 			assert.Equal(t, tc.totalRequests, data.TotalRequests)
@@ -498,7 +512,9 @@ func TestParseURLError(t *testing.T) {
 		t.Run(fmt.Sprintf("#%d", i+1), func(t *testing.T) {
 			logParser := parser.NewParser()
 
-			_, err := logParser.Parse(tc.url, nil, nil)
+			_, err := logParser.Parse(parser.Params{
+				Path: tc.url,
+			})
 			require.Error(t, err, "bad url")
 		})
 	}

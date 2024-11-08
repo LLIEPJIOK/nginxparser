@@ -10,8 +10,6 @@ import (
 	"github.com/es-debug/backend-academy-2024-go-template/internal/parser"
 )
 
-const dataLayout = "2006-01-02"
-
 func Start() error {
 	fl, err := readCMDFlags()
 	if err != nil {
@@ -26,7 +24,13 @@ func Start() error {
 
 	logParser := parser.NewParser()
 
-	info, err := logParser.Parse(fl.path, fl.timeFrom, fl.timeTo)
+	info, err := logParser.Parse(parser.Params{
+		Path:        fl.path,
+		From:        fl.timeFrom,
+		To:          fl.timeTo,
+		FilterField: fl.filterField,
+		FilterValue: fl.filterValue,
+	})
 	if err != nil {
 		return fmt.Errorf("parse file: %w", err)
 	}
