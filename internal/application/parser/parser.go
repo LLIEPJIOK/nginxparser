@@ -41,7 +41,7 @@ func Start() error {
 		return nil
 	}
 
-	logParser := parser.NewParser()
+	logParser := parser.New()
 
 	info, err := logParser.Parse(parser.Params{
 		Path:        fl.path,

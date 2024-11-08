@@ -1,6 +1,7 @@
 package parser_test
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -112,7 +113,7 @@ func TestParseFile(t *testing.T) {
 			fileName := createTestFiles(t, tc.content)
 			defer deleteTestFiles(t, getRoot(fileName))
 
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			data, err := logParser.Parse(parser.Params{
 				Path: fileName,
@@ -199,7 +200,7 @@ func TestParseMultipleFiles(t *testing.T) {
 			fileName := createTestFiles(t, tc.content...)
 			defer deleteTestFiles(t, getRoot(fileName))
 
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			data, err := logParser.Parse(parser.Params{
 				Path: fileName,
@@ -336,7 +337,7 @@ func TestParseFileWithTimeFilter(t *testing.T) {
 			fileName := createTestFiles(t, tc.content)
 			defer deleteTestFiles(t, getRoot(fileName))
 
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			data, err := logParser.Parse(parser.Params{
 				Path: fileName,
@@ -568,7 +569,7 @@ func TestParseFileWithFieldFilter(t *testing.T) {
 			fileName := createTestFiles(t, tc.content)
 			defer deleteTestFiles(t, getRoot(fileName))
 
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			data, err := logParser.Parse(parser.Params{
 				Path:        fileName,
@@ -620,7 +621,7 @@ func TestParseFileContentError(t *testing.T) {
 			fileName := createTestFiles(t, tc.content)
 			defer deleteTestFiles(t, getRoot(fileName))
 
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			_, err := logParser.Parse(parser.Params{
 				Path: fileName,
@@ -643,7 +644,7 @@ func TestParseFileExistenceError(t *testing.T) {
 
 	for _, tc := range tt {
 		t.Run(tc.name, func(t *testing.T) {
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			_, err := logParser.Parse(parser.Params{
 				Path: tc.fileName,
@@ -705,7 +706,7 @@ func TestParseURL(t *testing.T) {
 			)
 			defer server.Close()
 
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			data, err := logParser.Parse(parser.Params{
 				Path: server.URL,
@@ -740,12 +741,373 @@ func TestParseURLError(t *testing.T) {
 
 	for i, tc := range tt {
 		t.Run(fmt.Sprintf("#%d", i+1), func(t *testing.T) {
-			logParser := parser.NewParser()
+			logParser := parser.New()
 
 			_, err := logParser.Parse(parser.Params{
 				Path: tc.url,
 			})
 			require.Error(t, err, "bad url")
+		})
+	}
+}
+
+func TestMarkdown(t *testing.T) {
+	tt := []struct {
+		name     string
+		info     *domain.FileInfo
+		expected string
+	}{
+		{
+			name: "Single file",
+			info: &domain.FileInfo{
+				Paths:             []string{"/var/log/nginx/access.log"},
+				TotalRequests:     100,
+				AvgResponseSize:   512,
+				ResponseSize95p:   800,
+				AvgResponsePerDay: 10,
+				FrequentURLs: []domain.URL{
+					domain.NewURL("/index.html", 50),
+					domain.NewURL("/about.html", 20),
+				},
+				FrequentStatuses: []domain.Status{
+					domain.NewStatus(200, 80),
+					domain.NewStatus(404, 10),
+				},
+				FrequentAddresses: []domain.Address{
+					domain.NewAddress("192.168.1.1", 30),
+					domain.NewAddress("10.0.0.2", 20),
+				},
+			},
+			expected: "#### General information\n\n" +
+				"| Метрика | Значение |\n" +
+				"|:-|-:|\n" +
+				"| Files | /var/log/nginx/access.log |\n" +
+				"| Number of requests | 100 |\n" +
+				"| Average response size | 512 |\n" +
+				"| 95th Percentile of response size | 800 |\n" +
+				"| Average requests per day | 10 |\n\n" +
+				"#### Requested resources\n\n" +
+				"| Resource | Count |\n" +
+				"|:-|-:|\n" +
+				"| `/index.html` | 50 |\n" +
+				"| `/about.html` | 20 |\n\n" +
+				"#### Response codes\n\n" +
+				"| Code | Name | Count |\n" +
+				"|:-|:-:|-:|\n" +
+				"| 200 | OK | 80 |\n" +
+				"| 404 | Not Found | 10 |\n\n" +
+				"#### Requesting addresses\n\n" +
+				"| Address | Count |\n" +
+				"|:-|-:|\n" +
+				"| `192.168.1.1` | 30 |\n" +
+				"| `10.0.0.2` | 20 |\n",
+		},
+		{
+			name: "Multiple files",
+			info: &domain.FileInfo{
+				Paths:             []string{"/var/log/nginx/access.log", "/var/log/nginx/access.log.1"},
+				TotalRequests:     1000,
+				AvgResponseSize:   1024,
+				ResponseSize95p:   1500,
+				AvgResponsePerDay: 100,
+				FrequentURLs: []domain.URL{
+					domain.NewURL("/home", 300),
+					domain.NewURL("/login", 150),
+					domain.NewURL("/dashboard", 100),
+				},
+				FrequentStatuses: []domain.Status{
+					domain.NewStatus(200, 700),
+					domain.NewStatus(403, 50),
+					domain.NewStatus(500, 20),
+				},
+				FrequentAddresses: []domain.Address{
+					domain.NewAddress("172.16.0.1", 200),
+					domain.NewAddress("192.168.1.2", 150),
+					domain.NewAddress("10.0.0.3", 120),
+				},
+			},
+			expected: "#### General information\n\n" +
+				"| Метрика | Значение |\n" +
+				"|:-|-:|\n" +
+				"| Files | /var/log/nginx/access.log, /var/log/nginx/access.log.1 |\n" +
+				"| Number of requests | 1000 |\n" +
+				"| Average response size | 1024 |\n" +
+				"| 95th Percentile of response size | 1500 |\n" +
+				"| Average requests per day | 100 |\n\n" +
+				"#### Requested resources\n\n" +
+				"| Resource | Count |\n" +
+				"|:-|-:|\n" +
+				"| `/home` | 300 |\n" +
+				"| `/login` | 150 |\n" +
+				"| `/dashboard` | 100 |\n\n" +
+				"#### Response codes\n\n" +
+				"| Code | Name | Count |\n" +
+				"|:-|:-:|-:|\n" +
+				"| 200 | OK | 700 |\n" +
+				"| 403 | Forbidden | 50 |\n" +
+				"| 500 | Internal Server Error | 20 |\n\n" +
+				"#### Requesting addresses\n\n" +
+				"| Address | Count |\n" +
+				"|:-|-:|\n" +
+				"| `172.16.0.1` | 200 |\n" +
+				"| `192.168.1.2` | 150 |\n" +
+				"| `10.0.0.3` | 120 |\n",
+		},
+		{
+			name: "URL",
+			info: &domain.FileInfo{
+				Paths:             []string{"https://raw.githubusercontent.com/elastic/examples/master/Common%20Data%20Formats/nginx_logs/nginx_logs"},
+				TotalRequests:     5000,
+				AvgResponseSize:   2048,
+				ResponseSize95p:   3000,
+				AvgResponsePerDay: 500,
+				FrequentURLs: []domain.URL{
+					domain.NewURL("/home", 1000),
+					domain.NewURL("/products", 800),
+					domain.NewURL("/contact", 600),
+				},
+				FrequentStatuses: []domain.Status{
+					domain.NewStatus(200, 4000),
+					domain.NewStatus(404, 400),
+					domain.NewStatus(503, 50),
+				},
+				FrequentAddresses: []domain.Address{
+					domain.NewAddress("192.168.0.10", 500),
+					domain.NewAddress("192.168.0.20", 450),
+					domain.NewAddress("192.168.0.30", 300),
+				},
+			},
+			expected: "#### General information\n\n" +
+				"| Метрика | Значение |\n" +
+				"|:-|-:|\n" +
+				"| Files | https://raw.githubusercontent.com/elastic/examples/master/Common%20Data%20Formats/nginx_logs/nginx_logs |\n" +
+				"| Number of requests | 5000 |\n" +
+				"| Average response size | 2048 |\n" +
+				"| 95th Percentile of response size | 3000 |\n" +
+				"| Average requests per day | 500 |\n\n" +
+				"#### Requested resources\n\n" +
+				"| Resource | Count |\n" +
+				"|:-|-:|\n" +
+				"| `/home` | 1000 |\n" +
+				"| `/products` | 800 |\n" +
+				"| `/contact` | 600 |\n\n" +
+				"#### Response codes\n\n" +
+				"| Code | Name | Count |\n" +
+				"|:-|:-:|-:|\n" +
+				"| 200 | OK | 4000 |\n" +
+				"| 404 | Not Found | 400 |\n" +
+				"| 503 | Service Unavailable | 50 |\n\n" +
+				"#### Requesting addresses\n\n" +
+				"| Address | Count |\n" +
+				"|:-|-:|\n" +
+				"| `192.168.0.10` | 500 |\n" +
+				"| `192.168.0.20` | 450 |\n" +
+				"| `192.168.0.30` | 300 |\n",
+		},
+	}
+
+	logParser := parser.New()
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			logParser.Markdown(tc.info, buf)
+
+			assert.Equal(t, tc.expected, buf.String())
+		})
+	}
+}
+
+func TestAdoc(t *testing.T) {
+	tt := []struct {
+		name     string
+		info     *domain.FileInfo
+		expected string
+	}{
+		{
+			name: "Single file",
+			info: &domain.FileInfo{
+				Paths:             []string{"/var/log/nginx/access.log"},
+				TotalRequests:     100,
+				AvgResponseSize:   512,
+				ResponseSize95p:   800,
+				AvgResponsePerDay: 10,
+				FrequentURLs: []domain.URL{
+					domain.NewURL("/index.html", 50),
+					domain.NewURL("/about.html", 20),
+				},
+				FrequentStatuses: []domain.Status{
+					domain.NewStatus(200, 80),
+					domain.NewStatus(404, 10),
+				},
+				FrequentAddresses: []domain.Address{
+					domain.NewAddress("192.168.1.1", 30),
+					domain.NewAddress("10.0.0.2", 20),
+				},
+			},
+			expected: "==== General Information\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Метрика | Значение\n" +
+				"| Files | /var/log/nginx/access.log\n" +
+				"| Number of requests | 100\n" +
+				"| Average response size | 512\n" +
+				"| 95th percentile of response size | 800\n" +
+				"| Average requests per day | 10 |\n" +
+				"|===\n\n" +
+
+				"==== Requested Resources\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Resource | Count\n" +
+				"| `/index.html` | 50\n" +
+				"| `/about.html` | 20\n" +
+				"|===\n\n" +
+
+				"==== Response Codes\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Code | Name | Count\n" +
+				"| 200 | OK | 80\n" +
+				"| 404 | Not Found | 10\n" +
+				"|===\n\n" +
+
+				"==== Requesting addresses\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Name | Count\n" +
+				"| 192.168.1.1 | 30\n" +
+				"| 10.0.0.2 | 20\n" +
+				"|===\n",
+		},
+		{
+			name: "Multiple files",
+			info: &domain.FileInfo{
+				Paths:             []string{"/var/log/nginx/access.log", "/var/log/nginx/access.log.1"},
+				TotalRequests:     1000,
+				AvgResponseSize:   1024,
+				ResponseSize95p:   1500,
+				AvgResponsePerDay: 100,
+				FrequentURLs: []domain.URL{
+					domain.NewURL("/home", 300),
+					domain.NewURL("/login", 150),
+					domain.NewURL("/dashboard", 100),
+				},
+				FrequentStatuses: []domain.Status{
+					domain.NewStatus(200, 700),
+					domain.NewStatus(403, 50),
+					domain.NewStatus(500, 20),
+				},
+				FrequentAddresses: []domain.Address{
+					domain.NewAddress("172.16.0.1", 200),
+					domain.NewAddress("192.168.1.2", 150),
+					domain.NewAddress("10.0.0.3", 120),
+				},
+			},
+			expected: "==== General Information\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Метрика | Значение\n" +
+				"| Files | /var/log/nginx/access.log, /var/log/nginx/access.log.1\n" +
+				"| Number of requests | 1000\n" +
+				"| Average response size | 1024\n" +
+				"| 95th percentile of response size | 1500\n" +
+				"| Average requests per day | 100 |\n" +
+				"|===\n\n" +
+				"==== Requested Resources\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Resource | Count\n" +
+				"| `/home` | 300\n" +
+				"| `/login` | 150\n" +
+				"| `/dashboard` | 100\n" +
+				"|===\n\n" +
+				"==== Response Codes\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Code | Name | Count\n" +
+				"| 200 | OK | 700\n" +
+				"| 403 | Forbidden | 50\n" +
+				"| 500 | Internal Server Error | 20\n" +
+				"|===\n\n" +
+				"==== Requesting addresses\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Name | Count\n" +
+				"| 172.16.0.1 | 200\n" +
+				"| 192.168.1.2 | 150\n" +
+				"| 10.0.0.3 | 120\n" +
+				"|===\n",
+		},
+		{
+			name: "URL",
+			info: &domain.FileInfo{
+				Paths:             []string{"https://raw.githubusercontent.com/elastic/examples/master/Common%20Data%20Formats/nginx_logs/nginx_logs"},
+				TotalRequests:     5000,
+				AvgResponseSize:   2048,
+				ResponseSize95p:   3000,
+				AvgResponsePerDay: 500,
+				FrequentURLs: []domain.URL{
+					domain.NewURL("/home", 1000),
+					domain.NewURL("/products", 800),
+					domain.NewURL("/contact", 600),
+				},
+				FrequentStatuses: []domain.Status{
+					domain.NewStatus(200, 4000),
+					domain.NewStatus(404, 400),
+					domain.NewStatus(503, 50),
+				},
+				FrequentAddresses: []domain.Address{
+					domain.NewAddress("192.168.0.10", 500),
+					domain.NewAddress("192.168.0.20", 450),
+					domain.NewAddress("192.168.0.30", 300),
+				},
+			},
+			expected: "==== General Information\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Метрика | Значение\n" +
+				"| Files | https://raw.githubusercontent.com/elastic/examples/master/Common%20Data%20Formats/nginx_logs/nginx_logs\n" +
+				"| Number of requests | 5000\n" +
+				"| Average response size | 2048\n" +
+				"| 95th percentile of response size | 3000\n" +
+				"| Average requests per day | 500 |\n" +
+				"|===\n\n" +
+				"==== Requested Resources\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Resource | Count\n" +
+				"| `/home` | 1000\n" +
+				"| `/products` | 800\n" +
+				"| `/contact` | 600\n" +
+				"|===\n\n" +
+				"==== Response Codes\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Code | Name | Count\n" +
+				"| 200 | OK | 4000\n" +
+				"| 404 | Not Found | 400\n" +
+				"| 503 | Service Unavailable | 50\n" +
+				"|===\n\n" +
+				"==== Requesting addresses\n\n" +
+				"[options=\"header\"]\n" +
+				"|===\n" +
+				"| Name | Count\n" +
+				"| 192.168.0.10 | 500\n" +
+				"| 192.168.0.20 | 450\n" +
+				"| 192.168.0.30 | 300\n" +
+				"|===\n",
+		},
+	}
+
+	logParser := parser.New()
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := &bytes.Buffer{}
+			logParser.Adoc(tc.info, buf)
+
+			assert.Equal(t, tc.expected, buf.String())
 		})
 	}
 }

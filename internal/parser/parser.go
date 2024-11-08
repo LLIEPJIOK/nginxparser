@@ -185,7 +185,7 @@ type Parser struct {
 	timeLayout string
 }
 
-func NewParser() *Parser {
+func New() *Parser {
 	regex := regexp.MustCompile(
 		`^(\S+) - (\S+) \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+) "([^"]+)" "([^"]*)"$`,
 	)
@@ -558,6 +558,8 @@ func (p *Parser) Parse(prm Params) (*domain.FileInfo, error) {
 	eg, ctx := errgroup.WithContext(context.Background())
 
 	if pathURL, err := parseURL(prm.Path); err == nil {
+		parseData.paths = []string{pathURL.String()}
+
 		resp, err := http.Get(pathURL.String())
 		if err != nil {
 			return nil, fmt.Errorf("get file from url: %w", err)
@@ -624,7 +626,7 @@ func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
 		fmt.Fprintf(out, "| `%s` | %d |\n", url.Name, url.Quantity)
 	}
 
-	fmt.Fprint(out, "#### Response codes\n\n")
+	fmt.Fprint(out, "\n#### Response codes\n\n")
 	fmt.Fprint(out, "| Code | Name | Count |\n")
 	fmt.Fprint(out, "|:-|:-:|-:|\n")
 
@@ -632,7 +634,7 @@ func (p *Parser) Markdown(info *domain.FileInfo, out io.Writer) {
 		fmt.Fprintf(out, "| %d | %s | %d |\n", status.Code, status.Name, status.Quantity)
 	}
 
-	fmt.Fprint(out, "#### Requesting addresses\n\n")
+	fmt.Fprint(out, "\n#### Requesting addresses\n\n")
 	fmt.Fprint(out, "| Address | Count |\n")
 	fmt.Fprint(out, "|:-|-:|\n")
 
