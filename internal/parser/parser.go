@@ -151,7 +151,9 @@ func frequentAddresses(parseData *data) []domain.Address {
 
 func dataToFileInfo(parseData *data) *domain.FileInfo {
 	if parseData.totalRequests == 0 {
-		return &domain.FileInfo{}
+		return &domain.FileInfo{
+			Paths: parseData.paths,
+		}
 	}
 
 	avgResponseSize := parseData.sizeSum / parseData.totalRequests
