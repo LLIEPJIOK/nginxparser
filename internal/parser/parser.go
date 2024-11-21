@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/es-debug/backend-academy-2024-go-template/internal/domain"
+	"github.com/LLIEPJIOK/nginxparser/internal/domain"
 	"golang.org/x/sync/errgroup"
 )
 

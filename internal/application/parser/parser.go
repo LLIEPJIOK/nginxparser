@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"os"
 
-	"github.com/es-debug/backend-academy-2024-go-template/internal/parser"
+	"github.com/LLIEPJIOK/nginxparser/internal/parser"
 )
 
 const possibleFilterFields = `

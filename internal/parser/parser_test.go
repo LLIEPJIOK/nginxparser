@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/es-debug/backend-academy-2024-go-template/internal/domain"
-	"github.com/es-debug/backend-academy-2024-go-template/internal/parser"
+	"github.com/LLIEPJIOK/nginxparser/internal/domain"
+	"github.com/LLIEPJIOK/nginxparser/internal/parser"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
