@@ -93,8 +93,6 @@ func readCMDFlags() (cmdFlags, error) {
 		return cmdFlags{}, fmt.Errorf("parse time to %q: %w", to, err)
 	}
 
-	fmt.Println(filterField, filterValue)
-
 	return cmdFlags{
 		path:        path,
 		format:      strings.ToLower(format),

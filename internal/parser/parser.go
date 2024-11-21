@@ -462,8 +462,6 @@ func matchLogByField(logEntry *log, filed, pattern string) (bool, error) {
 		return false, fmt.Errorf("error matching regex: %w", err)
 	}
 
-	fmt.Println(pattern, value, matched)
-
 	return matched, nil
 }
 
